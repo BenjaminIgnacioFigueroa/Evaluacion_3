@@ -7,9 +7,9 @@ import pandas as pd
 import json
 import requests
 import io
-from database import get_db
-from models import ProductoModel, VentaUnitariaModel, TarifaModel, CierreUFModel, DataProcesadaModel
-from schemas import ProductoCreate, ProductoResponse, ProductoUpdate, VentaUnitariaCreate, VentaUnitariaResponse, VentaUnitariaUpdate, VentaConProductoResponse, TarifaCreate, TarifaResponse, TarifaUpdate, VentaCompletaResponse, CierreUFCreate, CierreUFResponse, CierreUFUpdate, DataProcesadaCreate, DataProcesadaResponse, DataProcesadaUpdate
+from etl.database import get_db
+from etl.models import ProductoModel, VentaUnitariaModel, TarifaModel, CierreUFModel, DataProcesadaModel
+from etl.schemas import ProductoCreate, ProductoResponse, ProductoUpdate, VentaUnitariaCreate, VentaUnitariaResponse, VentaUnitariaUpdate, VentaConProductoResponse, TarifaCreate, TarifaResponse, TarifaUpdate, VentaCompletaResponse, CierreUFCreate, CierreUFResponse, CierreUFUpdate, DataProcesadaCreate, DataProcesadaResponse, DataProcesadaUpdate
 
 router = APIRouter(prefix="/productos", tags=["Productos"])
 

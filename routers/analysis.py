@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 import numpy as np
-from schemas import AnalysisResponse
+from etl.schemas import AnalysisResponse
 
 router = APIRouter(prefix="/analisis", tags=["Análisis"])
 

@@ -1,6 +1,6 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
-from config import settings
+from etl.config import settings
 
 # Variables globales para la base de datos
 engine = None

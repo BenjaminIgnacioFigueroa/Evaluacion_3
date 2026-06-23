@@ -1,8 +1,8 @@
 import json
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from config import settings
-from models import ProductoModel, Base
+from etl.config import settings
+from etl.models import ProductoModel, Base
 
 # Crear engine y SessionLocal directamente
 engine = create_engine(settings.DATABASE_URL)

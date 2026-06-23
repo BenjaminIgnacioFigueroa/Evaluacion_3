@@ -1,6 +1,6 @@
 from fastapi import APIRouter
-from schemas import HealthResponse
-from database import engine
+from etl.schemas import HealthResponse
+from etl.database import engine
 
 router = APIRouter(prefix="/health", tags=["Health"])
 

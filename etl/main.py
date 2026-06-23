@@ -1,8 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from config import settings
-from database import init_database, create_tables
-from models import Base
+from etl.config import settings
+from etl.database import init_database, create_tables
+from etl.models import Base
 from routers import analysis, data, health
 
 # Inicializar base de datos
