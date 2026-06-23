@@ -57,3 +57,168 @@ class HealthResponse(BaseModel):
     status: str
     database_connected: bool
     database_url_configured: bool
+
+
+class VentaUnitariaBase(BaseModel):
+    """Schema base para ventas unitarias"""
+    ciclo: str
+    codigo_erp: str
+    cantidad: float
+
+
+class VentaUnitariaCreate(VentaUnitariaBase):
+    """Schema para crear ventas unitarias"""
+    pass
+
+
+class VentaUnitariaResponse(VentaUnitariaBase):
+    """Schema para respuesta de ventas unitarias"""
+    id: int
+    
+    class Config:
+        from_attributes = True
+
+
+class VentaUnitariaUpdate(BaseModel):
+    """Schema para actualizar ventas unitarias (todos los campos opcionales)"""
+    ciclo: Optional[str] = None
+    codigo_erp: Optional[str] = None
+    cantidad: Optional[float] = None
+
+
+class VentaConProductoResponse(BaseModel):
+    """Schema para respuesta de ventas unitarias con información del producto"""
+    id: int
+    ciclo: str
+    codigo_erp: str
+    cantidad: float
+    producto_nombre: Optional[str] = None
+    producto_peso_ton: Optional[float] = None
+    producto_peso_gr: Optional[float] = None
+    producto_codigo_interno: Optional[int] = None
+    producto_categoria: Optional[str] = None
+    producto_subcategoria: Optional[str] = None
+    producto_tipo_material: Optional[str] = None
+    producto_material: Optional[str] = None
+    producto_riesgo: Optional[str] = None
+
+
+class TarifaBase(BaseModel):
+    """Schema base para tarifas"""
+    codigo: int
+    celda: str
+    t2025: float
+    t2026: float
+
+
+class TarifaCreate(TarifaBase):
+    """Schema para crear tarifas"""
+    pass
+
+
+class TarifaResponse(TarifaBase):
+    """Schema para respuesta de tarifas"""
+    id: int
+    
+    class Config:
+        from_attributes = True
+
+
+class TarifaUpdate(BaseModel):
+    """Schema para actualizar tarifas (todos los campos opcionales)"""
+    codigo: Optional[int] = None
+    celda: Optional[str] = None
+    t2025: Optional[float] = None
+    t2026: Optional[float] = None
+
+
+class VentaCompletaResponse(BaseModel):
+    """Schema para respuesta de ventas unitarias con producto y tarifa"""
+    id: int
+    ciclo: str
+    codigo_erp: str
+    cantidad: float
+    producto_nombre: Optional[str] = None
+    producto_peso_ton: Optional[float] = None
+    producto_peso_gr: Optional[float] = None
+    producto_codigo_interno: Optional[int] = None
+    producto_categoria: Optional[str] = None
+    producto_subcategoria: Optional[str] = None
+    producto_tipo_material: Optional[str] = None
+    producto_material: Optional[str] = None
+    producto_riesgo: Optional[str] = None
+    tarifa_celda: Optional[str] = None
+    tarifa_t2025: Optional[float] = None
+    tarifa_t2026: Optional[float] = None
+
+
+class CierreUFBase(BaseModel):
+    """Schema base para cierres de UF"""
+    ciclo: str
+    uf_pesos: float
+
+
+class CierreUFCreate(CierreUFBase):
+    """Schema para crear cierres de UF"""
+    pass
+
+
+class CierreUFResponse(CierreUFBase):
+    """Schema para respuesta de cierres de UF"""
+    id: int
+    
+    class Config:
+        from_attributes = True
+
+
+class CierreUFUpdate(BaseModel):
+    """Schema para actualizar cierres de UF (todos los campos opcionales)"""
+    ciclo: Optional[str] = None
+    uf_pesos: Optional[float] = None
+
+
+class DataProcesadaBase(BaseModel):
+    """Schema base para datos procesados"""
+    codigo_interno: int
+    celda: str
+    categoria: str
+    subcategoria: str
+    tipo_material: str
+    material: str
+    riesgo: str
+    total_tonelada: float
+    total_gramos: float
+    cantidad_total: float
+    total_uf: float
+    total_clp: float
+    periodo: str
+
+
+class DataProcesadaCreate(DataProcesadaBase):
+    """Schema para crear datos procesados"""
+    pass
+
+
+class DataProcesadaResponse(DataProcesadaBase):
+    """Schema para respuesta de datos procesados"""
+    id: int
+    
+    class Config:
+        from_attributes = True
+
+
+class DataProcesadaUpdate(BaseModel):
+    """Schema para actualizar datos procesados (todos los campos opcionales)"""
+    codigo_interno: Optional[int] = None
+    celda: Optional[str] = None
+    categoria: Optional[str] = None
+    subcategoria: Optional[str] = None
+    tipo_material: Optional[str] = None
+    material: Optional[str] = None
+    riesgo: Optional[str] = None
+    total_tonelada: Optional[float] = None
+    total_gramos: Optional[float] = None
+    cantidad_total: Optional[float] = None
+    total_uf: Optional[float] = None
+    total_clp: Optional[float] = None
+    periodo: Optional[str] = None
