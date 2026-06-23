@@ -2,16 +2,13 @@ import { useState, useEffect } from 'react';
 import { 
   Package, 
   ShoppingCart, 
-  DollarSign, 
-  TrendingUp, 
-  FileText,
-  RefreshCw
+  RefreshCw,
+  Filter,
+  FileText
 } from 'lucide-react';
 import {
   BarChart,
   Bar,
-  LineChart,
-  Line,
   PieChart,
   Pie,
   Cell,
@@ -25,10 +22,7 @@ import {
 import {
   getProductos,
   getVentasUnitarias,
-  getTarifas,
-  getCierresUF,
-  getDataProcesada,
-  healthCheck
+  getDataProcesada
 } from '../services/api';
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
@@ -56,76 +50,159 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({
     productos: 0,
-    ventas: 0,
-    tarifas: 0,
-    cierresUF: 0,
-    dataProcesada: 0
+    ventas: 0
   });
   const [ventasPorCiclo, setVentasPorCiclo] = useState([]);
-  const [ventasPorCategoria, setVentasPorCategoria] = useState([]);
-  const [cierresUFTrend, setCierresUFTrend] = useState([]);
-  const [healthStatus, setHealthStatus] = useState('unknown');
+  const [selectedCiclo, setSelectedCiclo] = useState('');
+  const [availableCiclos, setAvailableCiclos] = useState([]);
+  const [totalClpByYear, setTotalClpByYear] = useState([]);
+  const [totalClpByMonth, setTotalClpByMonth] = useState([]);
 
   useEffect(() => {
     loadDashboardData();
   }, []);
 
+  useEffect(() => {
+    if (selectedCiclo) {
+      applyFilters();
+    } else {
+      loadDashboardData();
+    }
+  }, [selectedCiclo]);
+
+  const formatCiclo = (ciclo) => {
+    const year = ciclo.substring(0, 4);
+    const month = ciclo.substring(4, 6);
+    const meses = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+    const monthName = meses[parseInt(month) - 1];
+    return `${monthName} ${year}`;
+  };
+
+  const applyFilters = async () => {
+    try {
+      setLoading(true);
+      
+      const ventas = await getVentasUnitarias();
+
+      // Filtrar ventas por mes seleccionado (manteniendo todos los años para ese mes)
+      let filteredVentas = ventas;
+      if (selectedCiclo) {
+        const selectedMonth = selectedCiclo.substring(4, 6);
+        filteredVentas = filteredVentas.filter(v => v.ciclo.substring(4, 6) === selectedMonth);
+      }
+
+      setStats(prev => ({
+        ...prev,
+        ventas: filteredVentas.length
+      }));
+
+      // Actualizar gráfico de ventas por ciclo con datos filtrados
+      const ventasMonthYearData = filteredVentas.reduce((acc, venta) => {
+        const year = venta.ciclo.substring(0, 4);
+        const month = parseInt(venta.ciclo.substring(4, 6));
+        const key = `${month}`;
+        
+        if (!acc[key]) {
+          acc[key] = {};
+        }
+        acc[key][year] = (acc[key][year] || 0) + venta.cantidad;
+        return acc;
+      }, {});
+
+      const ventasCicloData = Object.entries(ventasMonthYearData)
+        .map(([month, years]) => ({
+          mes: parseInt(month),
+          ...years
+        }))
+        .sort((a, b) => a.mes - b.mes);
+      setVentasPorCiclo(ventasCicloData);
+
+    } catch (error) {
+      console.error('Error applying filters:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const clearFilters = () => {
+    setSelectedCiclo('');
+    loadDashboardData();
+  };
+
   const loadDashboardData = async () => {
     try {
       setLoading(true);
       
-      // Health check
-      const health = await healthCheck();
-      setHealthStatus(health.status);
-
       // Cargar estadísticas básicas
-      const [productos, ventas, tarifas, cierres, dataProc] = await Promise.all([
+      const [productos, ventas, dataProc] = await Promise.all([
         getProductos(),
         getVentasUnitarias(),
-        getTarifas(),
-        getCierresUF(),
         getDataProcesada()
       ]);
 
       setStats({
         productos: productos.length,
-        ventas: ventas.length,
-        tarifas: tarifas.length,
-        cierresUF: cierres.length,
-        dataProcesada: dataProc.length
+        ventas: ventas.length
       });
 
-      // Agrupar ventas por ciclo
-      const ventasByCiclo = ventas.reduce((acc, venta) => {
-        acc[venta.ciclo] = (acc[venta.ciclo] || 0) + venta.cantidad;
+      // Agrupar ventas por mes y año (para gráfico comparativo)
+      const ventasMonthYearData = ventas.reduce((acc, venta) => {
+        const year = venta.ciclo.substring(0, 4);
+        const month = parseInt(venta.ciclo.substring(4, 6));
+        const key = `${month}`;
+        
+        if (!acc[key]) {
+          acc[key] = {};
+        }
+        acc[key][year] = (acc[key][year] || 0) + venta.cantidad;
         return acc;
       }, {});
 
-      const ventasCicloData = Object.entries(ventasByCiclo)
-        .map(([ciclo, cantidad]) => ({ ciclo, cantidad }))
-        .sort((a, b) => a.ciclo.localeCompare(b.ciclo));
+      const ventasCicloData = Object.entries(ventasMonthYearData)
+        .map(([month, years]) => ({
+          mes: parseInt(month),
+          ...years
+        }))
+        .sort((a, b) => a.mes - b.mes);
       setVentasPorCiclo(ventasCicloData);
 
-      // Agrupar ventas por categoría (usando data procesada)
-      const dataByCategoria = dataProc.reduce((acc, item) => {
-        acc[item.categoria] = (acc[item.categoria] || 0) + item.total_tonelada;
+      // Extraer ciclos únicos para el filtro
+      const uniqueCiclos = [...new Set(ventas.map(v => v.ciclo))].sort();
+      setAvailableCiclos(uniqueCiclos);
+
+      // Procesar data procesada para gráficos
+      // Agrupar total_clp por año (para pie chart)
+      const totalByYear = dataProc.reduce((acc, item) => {
+        const year = item.periodo.substring(0, 4);
+        acc[year] = (acc[year] || 0) + (item.total_clp || 0);
         return acc;
       }, {});
 
-      const categoriaData = Object.entries(dataByCategoria)
-        .map(([categoria, total]) => ({ name: categoria, value: total }))
-        .sort((a, b) => b.value - a.value)
-        .slice(0, 6);
-      setVentasPorCategoria(categoriaData);
+      const yearData = Object.entries(totalByYear)
+        .map(([year, total]) => ({ name: year, value: total }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      setTotalClpByYear(yearData);
 
-      // Tendencia de cierres UF
-      const cierresTrend = cierres
-        .sort((a, b) => a.ciclo.localeCompare(b.ciclo))
-        .map(cierre => ({
-          ciclo: cierre.ciclo,
-          valor: cierre.uf_pesos
-        }));
-      setCierresUFTrend(cierresTrend);
+      // Agrupar total_clp por mes y año (para bar chart)
+      const monthYearData = dataProc.reduce((acc, item) => {
+        const year = item.periodo.substring(0, 4);
+        const month = parseInt(item.periodo.substring(4, 6));
+        const key = `${month}`;
+        
+        if (!acc[key]) {
+          acc[key] = {};
+        }
+        acc[key][year] = (acc[key][year] || 0) + (item.total_clp || 0);
+        return acc;
+      }, {});
+
+      const monthChartData = Object.entries(monthYearData)
+        .map(([month, years]) => ({
+          mes: parseInt(month),
+          ...years
+        }))
+        .sort((a, b) => a.mes - b.mes);
+      setTotalClpByMonth(monthChartData);
 
     } catch (error) {
       console.error('Error loading dashboard data:', error);
@@ -161,19 +238,43 @@ const Dashboard = () => {
         </button>
       </div>
 
-      {/* Health Status */}
-      <div className={`rounded-lg border p-4 ${
-        healthStatus === 'healthy' ? 'border-green-500 bg-green-50' : 'border-red-500 bg-red-50'
-      }`}>
-        <p className={`font-medium ${
-          healthStatus === 'healthy' ? 'text-green-700' : 'text-red-700'
-        }`}>
-          Estado del Sistema: {healthStatus === 'healthy' ? '✓ Saludable' : '✗ Error'}
-        </p>
+      {/* Filters */}
+      <div className="rounded-lg border border-border bg-card p-6 shadow-sm">
+        <div className="mb-4 flex items-center gap-2">
+          <Filter className="h-5 w-5 text-primary" />
+          <h3 className="text-lg font-semibold text-foreground">Filtros</h3>
+        </div>
+        <div className="grid gap-4 md:grid-cols-2">
+          <div>
+            <label className="mb-2 block text-sm font-medium text-foreground">
+              Ciclo
+            </label>
+            <select
+              value={selectedCiclo}
+              onChange={(e) => setSelectedCiclo(e.target.value)}
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+            >
+              <option value="">Todos los ciclos</option>
+              {availableCiclos.map((ciclo) => (
+                <option key={ciclo} value={ciclo}>
+                  {formatCiclo(ciclo)}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-end">
+            <button
+              onClick={clearFilters}
+              className="w-full rounded-md border border-input bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-accent hover:text-accent-foreground"
+            >
+              Limpiar Filtros
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* Stats Cards */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-2">
         <StatCard
           title="Productos"
           value={stats.productos}
@@ -184,83 +285,79 @@ const Dashboard = () => {
           value={stats.ventas}
           icon={ShoppingCart}
         />
-        <StatCard
-          title="Tarifas"
-          value={stats.tarifas}
-          icon={DollarSign}
-        />
-        <StatCard
-          title="Cierres UF"
-          value={stats.cierresUF}
-          icon={TrendingUp}
-        />
-        <StatCard
-          title="Data Procesada"
-          value={stats.dataProcesada}
-          icon={FileText}
-        />
       </div>
 
       {/* Charts */}
-      <div className="grid gap-6 md:grid-cols-2">
+      <div className="grid gap-6 md:grid-cols-1">
         {/* Ventas por Ciclo */}
         <div className="rounded-lg border border-border bg-card p-6 shadow-sm">
-          <h3 className="mb-4 text-lg font-semibold text-foreground">Ventas por Ciclo</h3>
+          <h3 className="mb-4 text-lg font-semibold text-foreground">Ventas por Ciclo (Cantidad por mes y año)</h3>
           <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={ventasPorCiclo}>
+            <BarChart data={ventasPorCiclo} barSize={20}>
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="ciclo" />
+              <XAxis dataKey="mes" />
               <YAxis />
               <Tooltip />
               <Legend />
-              <Bar dataKey="cantidad" fill="#3b82f6" name="Cantidad" />
+              {Object.keys(ventasPorCiclo.length > 0 ? ventasPorCiclo[0] : {}).filter(key => key !== 'mes').map((year, index) => (
+                <Bar 
+                  key={year} 
+                  dataKey={year} 
+                  fill={COLORS[index % COLORS.length]} 
+                  name={year}
+                />
+              ))}
             </BarChart>
           </ResponsiveContainer>
         </div>
 
-        {/* Ventas por Categoría */}
-        <div className="rounded-lg border border-border bg-card p-6 shadow-sm">
-          <h3 className="mb-4 text-lg font-semibold text-foreground">Ventas por Categoría (Toneladas)</h3>
-          <ResponsiveContainer width="100%" height={300}>
-            <PieChart>
-              <Pie
-                data={ventasPorCategoria}
-                cx="50%"
-                cy="50%"
-                labelLine={false}
-                label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                outerRadius={80}
-                fill="#8884d8"
-                dataKey="value"
-              >
-                {ventasPorCategoria.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                ))}
-              </Pie>
-              <Tooltip />
-            </PieChart>
-          </ResponsiveContainer>
-        </div>
+        {/* Data Procesada Charts */}
+        <div className="grid gap-6 md:grid-cols-2">
+          {/* Pie Chart - Total CLP por Año */}
+          <div className="rounded-lg border border-border bg-card p-6 shadow-sm">
+            <h3 className="mb-4 text-lg font-semibold text-foreground">Total CLP por Año</h3>
+            <ResponsiveContainer width="100%" height={300}>
+              <PieChart>
+                <Pie
+                  data={totalClpByYear}
+                  cx="50%"
+                  cy="50%"
+                  labelLine={false}
+                  label={({ name, percent }) => `${name} ${(percent * 100).toFixed(2)}%`}
+                  outerRadius={80}
+                  fill="#8884d8"
+                  dataKey="value"
+                >
+                  {totalClpByYear.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip formatter={(value) => `${(value / 1000000).toFixed(2)} mill.`} />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
 
-        {/* Tendencia Cierres UF */}
-        <div className="col-span-2 rounded-lg border border-border bg-card p-6 shadow-sm">
-          <h3 className="mb-4 text-lg font-semibold text-foreground">Tendencia de Cierres UF</h3>
-          <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={cierresUFTrend}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="ciclo" />
-              <YAxis />
-              <Tooltip />
-              <Legend />
-              <Line 
-                type="monotone" 
-                dataKey="valor" 
-                stroke="#10b981" 
-                strokeWidth={2}
-                name="Valor UF (CLP)"
-              />
-            </LineChart>
-          </ResponsiveContainer>
+          {/* Bar Chart - Total CLP por Mes y Año */}
+          <div className="rounded-lg border border-border bg-card p-6 shadow-sm">
+            <h3 className="mb-4 text-lg font-semibold text-foreground">Suma de total_clp por mes y año</h3>
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={totalClpByMonth} barSize={20}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="mes" />
+                <YAxis tickFormatter={(value) => `${(value / 1000000).toFixed(1)} mil.`} />
+                <Tooltip formatter={(value) => `${(value / 1000000).toFixed(2)} mill.`} />
+                <Legend />
+                {Object.keys(totalClpByMonth.length > 0 ? totalClpByMonth[0] : {}).filter(key => key !== 'mes').map((year, index) => (
+                  <Bar 
+                    key={year} 
+                    dataKey={year} 
+                    fill={COLORS[index % COLORS.length]} 
+                    name={year}
+                  />
+                ))}
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
         </div>
       </div>
 

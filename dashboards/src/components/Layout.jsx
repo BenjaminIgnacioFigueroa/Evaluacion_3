@@ -3,8 +3,6 @@ import { Outlet, Link, useLocation } from 'react-router-dom';
 import { 
   LayoutDashboard, 
   Package, 
-  ShoppingCart, 
-  DollarSign, 
   TrendingUp, 
   FileText, 
   Menu, 
@@ -21,8 +19,6 @@ const Layout = () => {
   const navigation = [
     { name: 'Dashboard', href: '/', icon: LayoutDashboard },
     { name: 'Productos', href: '/productos', icon: Package },
-    { name: 'Ventas Unitarias', href: '/ventas', icon: ShoppingCart },
-    { name: 'Tarifas', href: '/tarifas', icon: DollarSign },
     { name: 'Cierres UF', href: '/cierres-uf', icon: TrendingUp },
     { name: 'Data Procesada', href: '/data-procesada', icon: FileText },
   ];
