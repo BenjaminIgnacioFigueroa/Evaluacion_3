@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, ForeignKey
+from sqlalchemy import Column, Integer, String, Float, ForeignKey, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 
 Base = declarative_base()
@@ -59,6 +59,9 @@ class DataProcesadaModel(Base):
     """Modelo de datos procesados con resultados de la lógica de cálculo"""
     
     __tablename__ = "data_procesada"
+    __table_args__ = (
+        UniqueConstraint('codigo_interno', 'periodo', name='uq_codigo_periodo'),
+    )
     
     id = Column(Integer, primary_key=True, index=True)
     codigo_interno = Column(Integer, index=True)  # código usado en tarifas.json y productos.codigo_interno

@@ -1,10 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert
-from typing import List
+from typing import List, Optional
 import pandas as pd
 import json
 import requests
+import io
 from database import get_db
 from models import ProductoModel, VentaUnitariaModel, TarifaModel, CierreUFModel, DataProcesadaModel
 from schemas import ProductoCreate, ProductoResponse, ProductoUpdate, VentaUnitariaCreate, VentaUnitariaResponse, VentaUnitariaUpdate, VentaConProductoResponse, TarifaCreate, TarifaResponse, TarifaUpdate, VentaCompletaResponse, CierreUFCreate, CierreUFResponse, CierreUFUpdate, DataProcesadaCreate, DataProcesadaResponse, DataProcesadaUpdate
@@ -573,9 +575,155 @@ async def actualizar_cierres_desde_api(anios: List[int] = [2025, 2026], db: Sess
 
 
 # Endpoints para Data Procesada
+@data_procesada_router.post("/procesar-todos")
+def procesar_todos_ciclos(db: Session = Depends(get_db)):
+    """Procesar datos para todos los ciclos disponibles en ventas_unitarias"""
+    try:
+        # Obtener todos los ciclos únicos de ventas unitarias
+        ciclos = db.query(VentaUnitariaModel.ciclo).distinct().all()
+        ciclos = [c[0] for c in ciclos]
+        
+        if not ciclos:
+            raise HTTPException(status_code=404, detail="No se encontraron ciclos en ventas unitarias")
+        
+        resultados = []
+        errores = []
+        
+        for ciclo in ciclos:
+            try:
+                # Obtener todas las ventas del ciclo
+                ventas = db.query(VentaUnitariaModel).filter(VentaUnitariaModel.ciclo == ciclo).all()
+                
+                if not ventas:
+                    errores.append(f"Ciclo {ciclo}: No se encontraron ventas")
+                    continue
+                
+                # Obtener el valor de UF para el ciclo
+                cierre_uf = db.query(CierreUFModel).filter(CierreUFModel.ciclo == ciclo).first()
+                if not cierre_uf:
+                    errores.append(f"Ciclo {ciclo}: No se encontró cierre UF")
+                    continue
+                
+                valor_uf = cierre_uf.uf_pesos
+                
+                # Agrupar ventas por codigo_interno
+                from collections import defaultdict
+                ventas_por_codigo = defaultdict(lambda: {
+                    'cantidad_total': 0.0,
+                    'total_tonelada': 0.0,
+                    'total_gramos': 0.0,
+                    'total_uf': 0.0
+                })
+                
+                for venta in ventas:
+                    # Obtener producto
+                    producto = db.query(ProductoModel).filter(ProductoModel.codigo_erp == venta.codigo_erp).first()
+                    if not producto:
+                        continue
+                    
+                    # Obtener tarifa
+                    tarifa = db.query(TarifaModel).filter(TarifaModel.codigo == producto.codigo_interno).first()
+                    if not tarifa:
+                        continue
+                    
+                    # Determinar tarifa según año del ciclo
+                    anio = int(ciclo[:4])
+                    valor_tarifa = tarifa.t2025 if anio == 2025 else tarifa.t2026
+                    
+                    # Calcular valores
+                    cantidad = venta.cantidad
+                    toneladas = cantidad * producto.peso_ton
+                    gramos = cantidad * producto.peso_gr
+                    uf = toneladas * valor_tarifa
+                    
+                    # Acumular
+                    ventas_por_codigo[producto.codigo_interno]['cantidad_total'] += cantidad
+                    ventas_por_codigo[producto.codigo_interno]['total_tonelada'] += toneladas
+                    ventas_por_codigo[producto.codigo_interno]['total_gramos'] += gramos
+                    ventas_por_codigo[producto.codigo_interno]['total_uf'] += uf
+                
+                # Crear o actualizar registros procesados
+                registros_procesados = 0
+                for codigo_interno, datos in ventas_por_codigo.items():
+                    # Obtener información del producto y tarifa
+                    producto = db.query(ProductoModel).filter(ProductoModel.codigo_interno == codigo_interno).first()
+                    tarifa = db.query(TarifaModel).filter(TarifaModel.codigo == codigo_interno).first()
+                    
+                    if not producto or not tarifa:
+                        continue
+                    
+                    # Calcular total CLP
+                    total_clp = datos['total_uf'] * valor_uf
+                    
+                    # Verificar si ya existe un registro para este codigo_interno y ciclo
+                    existing = db.query(DataProcesadaModel).filter(
+                        DataProcesadaModel.codigo_interno == codigo_interno,
+                        DataProcesadaModel.periodo == ciclo
+                    ).first()
+                    
+                    if existing:
+                        # Actualizar registro existente
+                        existing.celda = tarifa.celda
+                        existing.categoria = producto.categoria
+                        existing.subcategoria = producto.subcategoria
+                        existing.tipo_material = producto.tipo_material
+                        existing.material = producto.material
+                        existing.riesgo = producto.riesgo
+                        existing.total_tonelada = datos['total_tonelada']
+                        existing.total_gramos = datos['total_gramos']
+                        existing.cantidad_total = datos['cantidad_total']
+                        existing.total_uf = datos['total_uf']
+                        existing.total_clp = total_clp
+                    else:
+                        # Crear nuevo registro
+                        data_procesada = DataProcesadaModel(
+                            codigo_interno=codigo_interno,
+                            celda=tarifa.celda,
+                            categoria=producto.categoria,
+                            subcategoria=producto.subcategoria,
+                            tipo_material=producto.tipo_material,
+                            material=producto.material,
+                            riesgo=producto.riesgo,
+                            total_tonelada=datos['total_tonelada'],
+                            total_gramos=datos['total_gramos'],
+                            cantidad_total=datos['cantidad_total'],
+                            total_uf=datos['total_uf'],
+                            total_clp=total_clp,
+                            periodo=ciclo
+                        )
+                        db.add(data_procesada)
+                    
+                    registros_procesados += 1
+                
+                resultados.append({
+                    "ciclo": ciclo,
+                    "registros_procesados": registros_procesados,
+                    "estado": "exitoso"
+                })
+                
+            except Exception as e:
+                errores.append(f"Ciclo {ciclo}: {str(e)}")
+        
+        db.commit()
+        
+        return {
+            "message": "Procesamiento de todos los ciclos completado",
+            "total_ciclos": len(ciclos),
+            "ciclos_procesados": len(resultados),
+            "resultados": resultados,
+            "errores": errores if errores else None
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error al procesar todos los ciclos: {str(e)}")
+
+
 @data_procesada_router.post("/procesar/{periodo}")
 def procesar_datos(periodo: str, db: Session = Depends(get_db)):
-    """Procesar datos para un periodo específico y generar registros en data_procesada"""
+    """Procesar datos para un periodo específico y generar registros en data_procesada (usando upsert para evitar duplicados)"""
     try:
         # Obtener todas las ventas del periodo
         ventas = db.query(VentaUnitariaModel).filter(VentaUnitariaModel.ciclo == periodo).all()
@@ -626,8 +774,8 @@ def procesar_datos(periodo: str, db: Session = Depends(get_db)):
             ventas_por_codigo[producto.codigo_interno]['total_gramos'] += gramos
             ventas_por_codigo[producto.codigo_interno]['total_uf'] += uf
         
-        # Crear registros procesados
-        registros_creados = 0
+        # Crear o actualizar registros procesados usando upsert (compatible con SQLite)
+        registros_procesados = 0
         for codigo_interno, datos in ventas_por_codigo.items():
             # Obtener información del producto y tarifa
             producto = db.query(ProductoModel).filter(ProductoModel.codigo_interno == codigo_interno).first()
@@ -639,32 +787,52 @@ def procesar_datos(periodo: str, db: Session = Depends(get_db)):
             # Calcular total CLP
             total_clp = datos['total_uf'] * valor_uf
             
-            # Crear registro
-            data_procesada = DataProcesadaModel(
-                codigo_interno=codigo_interno,
-                celda=tarifa.celda,
-                categoria=producto.categoria,
-                subcategoria=producto.subcategoria,
-                tipo_material=producto.tipo_material,
-                material=producto.material,
-                riesgo=producto.riesgo,
-                total_tonelada=datos['total_tonelada'],
-                total_gramos=datos['total_gramos'],
-                cantidad_total=datos['cantidad_total'],
-                total_uf=datos['total_uf'],
-                total_clp=total_clp,
-                periodo=periodo
-            )
+            # Verificar si ya existe un registro para este codigo_interno y periodo
+            existing = db.query(DataProcesadaModel).filter(
+                DataProcesadaModel.codigo_interno == codigo_interno,
+                DataProcesadaModel.periodo == periodo
+            ).first()
             
-            db.add(data_procesada)
-            registros_creados += 1
+            if existing:
+                # Actualizar registro existente
+                existing.celda = tarifa.celda
+                existing.categoria = producto.categoria
+                existing.subcategoria = producto.subcategoria
+                existing.tipo_material = producto.tipo_material
+                existing.material = producto.material
+                existing.riesgo = producto.riesgo
+                existing.total_tonelada = datos['total_tonelada']
+                existing.total_gramos = datos['total_gramos']
+                existing.cantidad_total = datos['cantidad_total']
+                existing.total_uf = datos['total_uf']
+                existing.total_clp = total_clp
+            else:
+                # Crear nuevo registro
+                data_procesada = DataProcesadaModel(
+                    codigo_interno=codigo_interno,
+                    celda=tarifa.celda,
+                    categoria=producto.categoria,
+                    subcategoria=producto.subcategoria,
+                    tipo_material=producto.tipo_material,
+                    material=producto.material,
+                    riesgo=producto.riesgo,
+                    total_tonelada=datos['total_tonelada'],
+                    total_gramos=datos['total_gramos'],
+                    cantidad_total=datos['cantidad_total'],
+                    total_uf=datos['total_uf'],
+                    total_clp=total_clp,
+                    periodo=periodo
+                )
+                db.add(data_procesada)
+            
+            registros_procesados += 1
         
         db.commit()
         
         return {
             "message": "Procesamiento completado",
             "periodo": periodo,
-            "registros_creados": registros_creados
+            "registros_procesados": registros_procesados
         }
         
     except HTTPException:
@@ -737,3 +905,196 @@ def delete_data_procesada(data_id: int, db: Session = Depends(get_db)):
     db.delete(db_data)
     db.commit()
     return {"message": "Data procesada eliminada correctamente"}
+
+
+@data_procesada_router.delete("/limpiar/todos")
+def limpiar_toda_data_procesada(db: Session = Depends(get_db)):
+    """Eliminar todos los registros de data procesada"""
+    try:
+        count = db.query(DataProcesadaModel).count()
+        if count == 0:
+            return {"message": "No hay datos procesados para eliminar", "registros_eliminados": 0}
+        
+        db.query(DataProcesadaModel).delete()
+        db.commit()
+        
+        return {
+            "message": "Todos los datos procesados han sido eliminados",
+            "registros_eliminados": count
+        }
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error al eliminar datos: {str(e)}")
+
+
+@data_procesada_router.get("/descargar/excel")
+def descargar_data_procesada_excel(periodo: Optional[str] = None, db: Session = Depends(get_db)):
+    """Descargar data procesada en formato Excel"""
+    query = db.query(DataProcesadaModel)
+    
+    if periodo:
+        query = query.filter(DataProcesadaModel.periodo == periodo)
+    
+    datos = query.all()
+    
+    if not datos:
+        raise HTTPException(status_code=404, detail="No se encontraron datos procesados")
+    
+    # Convertir a DataFrame
+    df = pd.DataFrame([{
+        'id': d.id,
+        'codigo_interno': d.codigo_interno,
+        'celda': d.celda,
+        'categoria': d.categoria,
+        'subcategoria': d.subcategoria,
+        'tipo_material': d.tipo_material,
+        'material': d.material,
+        'riesgo': d.riesgo,
+        'total_tonelada': round(d.total_tonelada, 5),
+        'total_gramos': round(d.total_gramos, 5),
+        'cantidad_total': int(d.cantidad_total),
+        'total_uf': round(d.total_uf, 2),
+        'total_clp': int(d.total_clp),
+        'periodo': d.periodo
+    } for d in datos])
+    
+    # Crear archivo Excel en memoria
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Data Procesada')
+    output.seek(0)
+    
+    filename = f"data_procesada_{periodo if periodo else 'todos'}.xlsx"
+    
+    return StreamingResponse(
+        output,
+        media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        headers={'Content-Disposition': f'attachment; filename="{filename}"'}
+    )
+
+
+@data_procesada_router.get("/descargar/csv")
+def descargar_data_procesada_csv(periodo: Optional[str] = None, db: Session = Depends(get_db)):
+    """Descargar data procesada en formato CSV"""
+    query = db.query(DataProcesadaModel)
+    
+    if periodo:
+        query = query.filter(DataProcesadaModel.periodo == periodo)
+    
+    datos = query.all()
+    
+    if not datos:
+        raise HTTPException(status_code=404, detail="No se encontraron datos procesados")
+    
+    # Convertir a DataFrame
+    df = pd.DataFrame([{
+        'id': d.id,
+        'codigo_interno': d.codigo_interno,
+        'celda': d.celda,
+        'categoria': d.categoria,
+        'subcategoria': d.subcategoria,
+        'tipo_material': d.tipo_material,
+        'material': d.material,
+        'riesgo': d.riesgo,
+        'total_tonelada': round(d.total_tonelada, 5),
+        'total_gramos': round(d.total_gramos, 5),
+        'cantidad_total': int(d.cantidad_total),
+        'total_uf': round(d.total_uf, 2),
+        'total_clp': int(d.total_clp),
+        'periodo': d.periodo
+    } for d in datos])
+    
+    # Crear archivo CSV en memoria
+    output = io.StringIO()
+    df.to_csv(output, index=False)
+    output.seek(0)
+    
+    filename = f"data_procesada_{periodo if periodo else 'todos'}.csv"
+    
+    return StreamingResponse(
+        io.BytesIO(output.getvalue().encode('utf-8')),
+        media_type='text/csv',
+        headers={'Content-Disposition': f'attachment; filename="{filename}"'}
+    )
+
+
+@data_procesada_router.get("/descargar/todos/excel")
+def descargar_todos_periodos_excel(db: Session = Depends(get_db)):
+    """Descargar data procesada de todos los periodos en Excel (consolidado)"""
+    datos = db.query(DataProcesadaModel).all()
+    
+    if not datos:
+        raise HTTPException(status_code=404, detail="No se encontraron datos procesados")
+    
+    # Convertir a DataFrame con todos los datos
+    df = pd.DataFrame([{
+        'id': d.id,
+        'codigo_interno': d.codigo_interno,
+        'celda': d.celda,
+        'categoria': d.categoria,
+        'subcategoria': d.subcategoria,
+        'tipo_material': d.tipo_material,
+        'material': d.material,
+        'riesgo': d.riesgo,
+        'total_tonelada': round(d.total_tonelada, 5),
+        'total_gramos': round(d.total_gramos, 5),
+        'cantidad_total': int(d.cantidad_total),
+        'total_uf': round(d.total_uf, 2),
+        'total_clp': int(d.total_clp),
+        'periodo': d.periodo
+    } for d in datos])
+    
+    # Ordenar por periodo
+    df = df.sort_values('periodo')
+    
+    # Crear archivo Excel en memoria
+    output = io.BytesIO()
+    df.to_excel(output, index=False, engine='openpyxl')
+    output.seek(0)
+    
+    return StreamingResponse(
+        output,
+        media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        headers={'Content-Disposition': 'attachment; filename="data_procesada_todos_periodos.xlsx"'}
+    )
+
+
+@data_procesada_router.get("/descargar/todos/csv")
+def descargar_todos_periodos_csv(db: Session = Depends(get_db)):
+    """Descargar data procesada de todos los periodos en CSV consolidado"""
+    datos = db.query(DataProcesadaModel).all()
+    
+    if not datos:
+        raise HTTPException(status_code=404, detail="No se encontraron datos procesados")
+    
+    # Convertir a DataFrame
+    df = pd.DataFrame([{
+        'id': d.id,
+        'codigo_interno': d.codigo_interno,
+        'celda': d.celda,
+        'categoria': d.categoria,
+        'subcategoria': d.subcategoria,
+        'tipo_material': d.tipo_material,
+        'material': d.material,
+        'riesgo': d.riesgo,
+        'total_tonelada': round(d.total_tonelada, 5),
+        'total_gramos': round(d.total_gramos, 5),
+        'cantidad_total': int(d.cantidad_total),
+        'total_uf': round(d.total_uf, 2),
+        'total_clp': int(d.total_clp),
+        'periodo': d.periodo
+    } for d in datos])
+    
+    # Ordenar por periodo
+    df = df.sort_values('periodo')
+    
+    # Crear archivo CSV en memoria
+    output = io.StringIO()
+    df.to_csv(output, index=False)
+    output.seek(0)
+    
+    return StreamingResponse(
+        io.BytesIO(output.getvalue().encode('utf-8')),
+        media_type='text/csv',
+        headers={'Content-Disposition': 'attachment; filename="data_procesada_todos_periodos.csv"'}
+    )

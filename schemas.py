@@ -217,7 +217,7 @@ class DataProcesadaResponse(DataProcesadaBase):
     
     @field_serializer('total_tonelada')
     def serialize_total_tonelada(self, value: float) -> float:
-        return round(value, 2)
+        return round(value, 5)
     
     @field_serializer('total_gramos')
     def serialize_total_gramos(self, value: float) -> float:
