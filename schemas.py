@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, field_serializer
 from typing import Optional
 
 
@@ -202,6 +202,26 @@ class DataProcesadaCreate(DataProcesadaBase):
 class DataProcesadaResponse(DataProcesadaBase):
     """Schema para respuesta de datos procesados"""
     id: int
+    
+    @field_serializer('total_uf')
+    def serialize_total_uf(self, value: float) -> float:
+        return round(value, 2)
+    
+    @field_serializer('total_clp')
+    def serialize_total_clp(self, value: float) -> int:
+        return int(value)
+    
+    @field_serializer('cantidad_total')
+    def serialize_cantidad_total(self, value: float) -> int:
+        return int(value)
+    
+    @field_serializer('total_tonelada')
+    def serialize_total_tonelada(self, value: float) -> float:
+        return round(value, 2)
+    
+    @field_serializer('total_gramos')
+    def serialize_total_gramos(self, value: float) -> float:
+        return round(value, 5)
     
     class Config:
         from_attributes = True
