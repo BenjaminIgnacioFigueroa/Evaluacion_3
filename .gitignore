@@ -1,0 +1,61 @@
+# Entorno virtual
+venv/
+env/
+ENV/
+
+# Archivos de configuración con credenciales
+.env
+.env.local
+.env.*.local
+secrets.py
+credentials.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Base de datos local
+*.db
+*.sqlite
+*.sqlite3
+
+# Archivos de datos
+data/
+datasets/
+*.csv
+*.xlsx
+*.json
+!example_data/
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
