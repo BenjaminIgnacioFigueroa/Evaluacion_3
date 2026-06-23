@@ -57,3 +57,30 @@ class HealthResponse(BaseModel):
     status: str
     database_connected: bool
     database_url_configured: bool
+
+
+class VentaUnitariaBase(BaseModel):
+    """Schema base para ventas unitarias"""
+    ciclo: str
+    codigo_erp: str
+    cantidad: float
+
+
+class VentaUnitariaCreate(VentaUnitariaBase):
+    """Schema para crear ventas unitarias"""
+    pass
+
+
+class VentaUnitariaResponse(VentaUnitariaBase):
+    """Schema para respuesta de ventas unitarias"""
+    id: int
+    
+    class Config:
+        from_attributes = True
+
+
+class VentaUnitariaUpdate(BaseModel):
+    """Schema para actualizar ventas unitarias (todos los campos opcionales)"""
+    ciclo: Optional[str] = None
+    codigo_erp: Optional[str] = None
+    cantidad: Optional[float] = None

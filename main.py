@@ -19,6 +19,7 @@ app = FastAPI(
 # Registrar routers
 app.include_router(analysis.router)
 app.include_router(data.router)
+app.include_router(data.ventas_router)
 app.include_router(health.router)
 
 
