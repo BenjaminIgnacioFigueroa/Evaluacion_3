@@ -2,24 +2,45 @@ from pydantic import BaseModel
 from typing import Optional
 
 
-class DataBase(BaseModel):
-    """Schema base para datos"""
-    name: str
-    value: float
-    category: str
+class ProductoBase(BaseModel):
+    """Schema base para productos"""
+    codigo_erp: str
+    nombre: str
+    peso_ton: float
+    peso_gr: float
+    codigo_interno: int
+    categoria: str
+    subcategoria: str
+    tipo_material: str
+    material: str
+    riesgo: str
 
 
-class DataCreate(DataBase):
-    """Schema para crear datos"""
+class ProductoCreate(ProductoBase):
+    """Schema para crear productos"""
     pass
 
 
-class DataResponse(DataBase):
-    """Schema para respuesta de datos"""
+class ProductoResponse(ProductoBase):
+    """Schema para respuesta de productos"""
     id: int
     
     class Config:
         from_attributes = True
+
+
+class ProductoUpdate(BaseModel):
+    """Schema para actualizar productos (todos los campos opcionales)"""
+    codigo_erp: Optional[str] = None
+    nombre: Optional[str] = None
+    peso_ton: Optional[float] = None
+    peso_gr: Optional[float] = None
+    codigo_interno: Optional[int] = None
+    categoria: Optional[str] = None
+    subcategoria: Optional[str] = None
+    tipo_material: Optional[str] = None
+    material: Optional[str] = None
+    riesgo: Optional[str] = None
 
 
 class AnalysisResponse(BaseModel):

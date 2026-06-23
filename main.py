@@ -41,7 +41,7 @@ def startup_event():
     print("🏥 Health Check:         http://localhost:8000/health")
     print("="*60)
     if db_connected:
-        print("✅ Base de datos PostgreSQL conectada")
+        print("✅ Base de datos conectada")
     else:
-        print("⚠️  Base de datos PostgreSQL no configurada")
+        print("⚠️  Base de datos no configurada")
     print("="*60 + "\n")

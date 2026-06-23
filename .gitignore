@@ -49,7 +49,6 @@ data/
 datasets/
 *.csv
 *.xlsx
-*.json
 !example_data/
 
 # Logs
