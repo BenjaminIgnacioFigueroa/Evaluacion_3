@@ -33,7 +33,7 @@ def uf_cierres_mes(anios=[2025, 2026], carpeta="Parametros"):
     with open(ruta, "w", encoding="utf-8") as f:
         json.dump(valores_json, f, ensure_ascii=False, indent=4)
 
-    print(f"✅ Archivo guardado en: {os.path.abspath(ruta)}")
+    print(f"Archivo guardado en: {os.path.abspath(ruta)}")
 
 if __name__ == "__main__":
     uf_cierres_mes()
