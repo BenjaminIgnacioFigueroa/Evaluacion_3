@@ -38,3 +38,20 @@ Esta data en formato json contiene las columnas:
 Data 4: cierreUF.json (API)
 
 Esta data se construye gracias al consumo de una api llamada miindicador.cl y en el caso de que no funcione se debe ingresar manualmente en el arhcivo cierreUF.json obteniendo el valor de SII
+
+Data 5: procesada (BD)
+
+Esta data lo que hace es contener el resultado de la lógica, es importante que me guarde las columnas:
+- codigo_interno: Es el codigo usado en tarifas.json y productos.codigo_interno.
+- celda: es la celda obtenida de tarifas.celda.  
+- categoria: Se obtiene de productos.categoria
+- subcategoria: Se obtiene de productos.subcategoria
+- tipo_material: Se obtiene de productos.tipo_material
+- material: se obtiene de productos.material
+- riesgo: se obtiene de productos.riesgo
+- total_tonelada: se obtiene de la multiplicación entre ventasUnitarias.cantidad y productos.peso_ton de cada fila para finalmente dejar la suma total de todos esos resultados según codigo interno. 
+- total_gramos: se obtiene de la multiplicación entre ventasUnitarias.cantidad y productos.peso_gr de cada fila para finalmente dejar la suma total de todos esos resultados según codigo interno. 
+- cantidad_total: Es la cantidad de productos vendidos según codigo interno
+- total_UF: Es la suma total en UF de todos los productos vendidos
+- total_clp: Es la suma total en UF multiplicada por el valor de cierreUF.json según periodo
+- periodo: corresponde al periodo en el cual dejamos totalizada la venta.
