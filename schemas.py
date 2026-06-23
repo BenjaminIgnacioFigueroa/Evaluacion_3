@@ -84,3 +84,20 @@ class VentaUnitariaUpdate(BaseModel):
     ciclo: Optional[str] = None
     codigo_erp: Optional[str] = None
     cantidad: Optional[float] = None
+
+
+class VentaConProductoResponse(BaseModel):
+    """Schema para respuesta de ventas unitarias con información del producto"""
+    id: int
+    ciclo: str
+    codigo_erp: str
+    cantidad: float
+    producto_nombre: Optional[str] = None
+    producto_peso_ton: Optional[float] = None
+    producto_peso_gr: Optional[float] = None
+    producto_codigo_interno: Optional[int] = None
+    producto_categoria: Optional[str] = None
+    producto_subcategoria: Optional[str] = None
+    producto_tipo_material: Optional[str] = None
+    producto_material: Optional[str] = None
+    producto_riesgo: Optional[str] = None

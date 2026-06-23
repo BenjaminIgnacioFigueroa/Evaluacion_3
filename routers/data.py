@@ -4,7 +4,7 @@ from typing import List
 import pandas as pd
 from database import get_db
 from models import ProductoModel, VentaUnitariaModel
-from schemas import ProductoCreate, ProductoResponse, ProductoUpdate, VentaUnitariaCreate, VentaUnitariaResponse, VentaUnitariaUpdate
+from schemas import ProductoCreate, ProductoResponse, ProductoUpdate, VentaUnitariaCreate, VentaUnitariaResponse, VentaUnitariaUpdate, VentaConProductoResponse
 
 router = APIRouter(prefix="/productos", tags=["Productos"])
 
@@ -187,3 +187,39 @@ async def importar_ventas_excel(file: UploadFile = File(...), db: Session = Depe
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error al procesar el archivo: {str(e)}")
+
+
+@ventas_router.get("/join-producto/{ciclo}", response_model=List[VentaConProductoResponse])
+def get_ventas_con_producto_por_ciclo(ciclo: str, db: Session = Depends(get_db)):
+    """Obtener ventas unitarias con información del producto filtradas por ciclo"""
+    # Realizar join entre VentaUnitaria y ProductoModel
+    resultados = db.query(VentaUnitariaModel, ProductoModel).join(
+        ProductoModel, 
+        VentaUnitariaModel.codigo_erp == ProductoModel.codigo_erp
+    ).filter(
+        VentaUnitariaModel.ciclo == ciclo
+    ).all()
+    
+    if not resultados:
+        raise HTTPException(status_code=404, detail=f"No se encontraron ventas para el ciclo {ciclo}")
+    
+    # Construir respuesta combinada
+    respuesta = []
+    for venta, producto in resultados:
+        respuesta.append({
+            "id": venta.id,
+            "ciclo": venta.ciclo,
+            "codigo_erp": venta.codigo_erp,
+            "cantidad": venta.cantidad,
+            "producto_nombre": producto.nombre,
+            "producto_peso_ton": producto.peso_ton,
+            "producto_peso_gr": producto.peso_gr,
+            "producto_codigo_interno": producto.codigo_interno,
+            "producto_categoria": producto.categoria,
+            "producto_subcategoria": producto.subcategoria,
+            "producto_tipo_material": producto.tipo_material,
+            "producto_material": producto.material,
+            "producto_riesgo": producto.riesgo
+        })
+    
+    return respuesta
