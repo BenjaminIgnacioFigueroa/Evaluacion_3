@@ -175,3 +175,50 @@ class CierreUFUpdate(BaseModel):
     """Schema para actualizar cierres de UF (todos los campos opcionales)"""
     ciclo: Optional[str] = None
     uf_pesos: Optional[float] = None
+
+
+class DataProcesadaBase(BaseModel):
+    """Schema base para datos procesados"""
+    codigo_interno: int
+    celda: str
+    categoria: str
+    subcategoria: str
+    tipo_material: str
+    material: str
+    riesgo: str
+    total_tonelada: float
+    total_gramos: float
+    cantidad_total: float
+    total_uf: float
+    total_clp: float
+    periodo: str
+
+
+class DataProcesadaCreate(DataProcesadaBase):
+    """Schema para crear datos procesados"""
+    pass
+
+
+class DataProcesadaResponse(DataProcesadaBase):
+    """Schema para respuesta de datos procesados"""
+    id: int
+    
+    class Config:
+        from_attributes = True
+
+
+class DataProcesadaUpdate(BaseModel):
+    """Schema para actualizar datos procesados (todos los campos opcionales)"""
+    codigo_interno: Optional[int] = None
+    celda: Optional[str] = None
+    categoria: Optional[str] = None
+    subcategoria: Optional[str] = None
+    tipo_material: Optional[str] = None
+    material: Optional[str] = None
+    riesgo: Optional[str] = None
+    total_tonelada: Optional[float] = None
+    total_gramos: Optional[float] = None
+    cantidad_total: Optional[float] = None
+    total_uf: Optional[float] = None
+    total_clp: Optional[float] = None
+    periodo: Optional[str] = None

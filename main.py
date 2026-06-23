@@ -22,6 +22,7 @@ app.include_router(data.router)
 app.include_router(data.ventas_router)
 app.include_router(data.tarifas_router)
 app.include_router(data.cierres_uf_router)
+app.include_router(data.data_procesada_router)
 app.include_router(health.router)
 
 

@@ -53,3 +53,24 @@ class CierreUFModel(Base):
     id = Column(Integer, primary_key=True, index=True)
     ciclo = Column(String, index=True, unique=True)  # ciclo en formato YYYYMM (ej: "202501")
     uf_pesos = Column(Float)  # valor de UF en pesos al cierre del mes
+
+
+class DataProcesadaModel(Base):
+    """Modelo de datos procesados con resultados de la lógica de cálculo"""
+    
+    __tablename__ = "data_procesada"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    codigo_interno = Column(Integer, index=True)  # código usado en tarifas.json y productos.codigo_interno
+    celda = Column(String)  # celda obtenida de tarifas.celda
+    categoria = Column(String, index=True)  # de productos.categoria
+    subcategoria = Column(String, index=True)  # de productos.subcategoria
+    tipo_material = Column(String)  # de productos.tipo_material
+    material = Column(String)  # de productos.material
+    riesgo = Column(String)  # de productos.riesgo
+    total_tonelada = Column(Float)  # suma de cantidad * peso_ton por codigo_interno
+    total_gramos = Column(Float)  # suma de cantidad * peso_gr por codigo_interno
+    cantidad_total = Column(Float)  # cantidad total de productos vendidos por codigo_interno
+    total_uf = Column(Float)  # suma total en UF de todos los productos vendidos
+    total_clp = Column(Float)  # total_uf * valor de cierreUF según periodo
+    periodo = Column(String, index=True)  # periodo en formato YYYYMM

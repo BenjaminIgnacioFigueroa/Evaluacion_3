@@ -6,8 +6,8 @@ import pandas as pd
 import json
 import requests
 from database import get_db
-from models import ProductoModel, VentaUnitariaModel, TarifaModel, CierreUFModel
-from schemas import ProductoCreate, ProductoResponse, ProductoUpdate, VentaUnitariaCreate, VentaUnitariaResponse, VentaUnitariaUpdate, VentaConProductoResponse, TarifaCreate, TarifaResponse, TarifaUpdate, VentaCompletaResponse, CierreUFCreate, CierreUFResponse, CierreUFUpdate
+from models import ProductoModel, VentaUnitariaModel, TarifaModel, CierreUFModel, DataProcesadaModel
+from schemas import ProductoCreate, ProductoResponse, ProductoUpdate, VentaUnitariaCreate, VentaUnitariaResponse, VentaUnitariaUpdate, VentaConProductoResponse, TarifaCreate, TarifaResponse, TarifaUpdate, VentaCompletaResponse, CierreUFCreate, CierreUFResponse, CierreUFUpdate, DataProcesadaCreate, DataProcesadaResponse, DataProcesadaUpdate
 
 router = APIRouter(prefix="/productos", tags=["Productos"])
 
@@ -16,6 +16,8 @@ ventas_router = APIRouter(prefix="/ventas-unitarias", tags=["Ventas Unitarias"])
 tarifas_router = APIRouter(prefix="/tarifas", tags=["Tarifas"])
 
 cierres_uf_router = APIRouter(prefix="/cierres-uf", tags=["Cierres UF"])
+
+data_procesada_router = APIRouter(prefix="/data-procesada", tags=["Data Procesada"])
 
 
 @router.post("/", response_model=ProductoResponse)
@@ -568,3 +570,170 @@ async def actualizar_cierres_desde_api(anios: List[int] = [2025, 2026], db: Sess
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error al consumir la API: {str(e)}")
+
+
+# Endpoints para Data Procesada
+@data_procesada_router.post("/procesar/{periodo}")
+def procesar_datos(periodo: str, db: Session = Depends(get_db)):
+    """Procesar datos para un periodo específico y generar registros en data_procesada"""
+    try:
+        # Obtener todas las ventas del periodo
+        ventas = db.query(VentaUnitariaModel).filter(VentaUnitariaModel.ciclo == periodo).all()
+        
+        if not ventas:
+            raise HTTPException(status_code=404, detail=f"No se encontraron ventas para el periodo {periodo}")
+        
+        # Obtener el valor de UF para el periodo
+        cierre_uf = db.query(CierreUFModel).filter(CierreUFModel.ciclo == periodo).first()
+        if not cierre_uf:
+            raise HTTPException(status_code=404, detail=f"No se encontró cierre UF para el periodo {periodo}")
+        
+        valor_uf = cierre_uf.uf_pesos
+        
+        # Agrupar ventas por codigo_interno
+        from collections import defaultdict
+        ventas_por_codigo = defaultdict(lambda: {
+            'cantidad_total': 0.0,
+            'total_tonelada': 0.0,
+            'total_gramos': 0.0,
+            'total_uf': 0.0
+        })
+        
+        for venta in ventas:
+            # Obtener producto
+            producto = db.query(ProductoModel).filter(ProductoModel.codigo_erp == venta.codigo_erp).first()
+            if not producto:
+                continue
+            
+            # Obtener tarifa
+            tarifa = db.query(TarifaModel).filter(TarifaModel.codigo == producto.codigo_interno).first()
+            if not tarifa:
+                continue
+            
+            # Determinar tarifa según año del periodo
+            anio = int(periodo[:4])
+            valor_tarifa = tarifa.t2025 if anio == 2025 else tarifa.t2026
+            
+            # Calcular valores
+            cantidad = venta.cantidad
+            toneladas = cantidad * producto.peso_ton
+            gramos = cantidad * producto.peso_gr
+            uf = toneladas * valor_tarifa
+            
+            # Acumular
+            ventas_por_codigo[producto.codigo_interno]['cantidad_total'] += cantidad
+            ventas_por_codigo[producto.codigo_interno]['total_tonelada'] += toneladas
+            ventas_por_codigo[producto.codigo_interno]['total_gramos'] += gramos
+            ventas_por_codigo[producto.codigo_interno]['total_uf'] += uf
+        
+        # Crear registros procesados
+        registros_creados = 0
+        for codigo_interno, datos in ventas_por_codigo.items():
+            # Obtener información del producto y tarifa
+            producto = db.query(ProductoModel).filter(ProductoModel.codigo_interno == codigo_interno).first()
+            tarifa = db.query(TarifaModel).filter(TarifaModel.codigo == codigo_interno).first()
+            
+            if not producto or not tarifa:
+                continue
+            
+            # Calcular total CLP
+            total_clp = datos['total_uf'] * valor_uf
+            
+            # Crear registro
+            data_procesada = DataProcesadaModel(
+                codigo_interno=codigo_interno,
+                celda=tarifa.celda,
+                categoria=producto.categoria,
+                subcategoria=producto.subcategoria,
+                tipo_material=producto.tipo_material,
+                material=producto.material,
+                riesgo=producto.riesgo,
+                total_tonelada=datos['total_tonelada'],
+                total_gramos=datos['total_gramos'],
+                cantidad_total=datos['cantidad_total'],
+                total_uf=datos['total_uf'],
+                total_clp=total_clp,
+                periodo=periodo
+            )
+            
+            db.add(data_procesada)
+            registros_creados += 1
+        
+        db.commit()
+        
+        return {
+            "message": "Procesamiento completado",
+            "periodo": periodo,
+            "registros_creados": registros_creados
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error al procesar datos: {str(e)}")
+
+
+@data_procesada_router.post("/", response_model=DataProcesadaResponse)
+def create_data_procesada(data: DataProcesadaCreate, db: Session = Depends(get_db)):
+    """Crear un nuevo registro de data procesada"""
+    db_data = DataProcesadaModel(**data.model_dump())
+    db.add(db_data)
+    db.commit()
+    db.refresh(db_data)
+    return db_data
+
+
+@data_procesada_router.get("/{data_id}", response_model=DataProcesadaResponse)
+def read_data_procesada(data_id: int, db: Session = Depends(get_db)):
+    """Obtener un registro de data procesada por ID"""
+    db_data = db.query(DataProcesadaModel).filter(DataProcesadaModel.id == data_id).first()
+    if db_data is None:
+        raise HTTPException(status_code=404, detail="Data procesada no encontrada")
+    return db_data
+
+
+@data_procesada_router.get("/", response_model=List[DataProcesadaResponse])
+def read_all_data_procesada(db: Session = Depends(get_db)):
+    """Obtener todos los registros de data procesada"""
+    return db.query(DataProcesadaModel).all()
+
+
+@data_procesada_router.get("/periodo/{periodo}", response_model=List[DataProcesadaResponse])
+def read_data_procesada_by_periodo(periodo: str, db: Session = Depends(get_db)):
+    """Obtener registros de data procesada por periodo"""
+    return db.query(DataProcesadaModel).filter(DataProcesadaModel.periodo == periodo).all()
+
+
+@data_procesada_router.get("/codigo/{codigo_interno}", response_model=List[DataProcesadaResponse])
+def read_data_procesada_by_codigo(codigo_interno: int, db: Session = Depends(get_db)):
+    """Obtener registros de data procesada por código interno"""
+    return db.query(DataProcesadaModel).filter(DataProcesadaModel.codigo_interno == codigo_interno).all()
+
+
+@data_procesada_router.put("/{data_id}", response_model=DataProcesadaResponse)
+def update_data_procesada(data_id: int, data: DataProcesadaUpdate, db: Session = Depends(get_db)):
+    """Actualizar un registro de data procesada existente"""
+    db_data = db.query(DataProcesadaModel).filter(DataProcesadaModel.id == data_id).first()
+    if db_data is None:
+        raise HTTPException(status_code=404, detail="Data procesada no encontrada")
+    
+    update_data = data.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(db_data, field, value)
+    
+    db.commit()
+    db.refresh(db_data)
+    return db_data
+
+
+@data_procesada_router.delete("/{data_id}")
+def delete_data_procesada(data_id: int, db: Session = Depends(get_db)):
+    """Eliminar un registro de data procesada"""
+    db_data = db.query(DataProcesadaModel).filter(DataProcesadaModel.id == data_id).first()
+    if db_data is None:
+        raise HTTPException(status_code=404, detail="Data procesada no encontrada")
+    
+    db.delete(db_data)
+    db.commit()
+    return {"message": "Data procesada eliminada correctamente"}
