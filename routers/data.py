@@ -1,17 +1,21 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
+from sqlalchemy.dialects.postgresql import insert
 from typing import List
 import pandas as pd
 import json
+import requests
 from database import get_db
-from models import ProductoModel, VentaUnitariaModel, TarifaModel
-from schemas import ProductoCreate, ProductoResponse, ProductoUpdate, VentaUnitariaCreate, VentaUnitariaResponse, VentaUnitariaUpdate, VentaConProductoResponse, TarifaCreate, TarifaResponse, TarifaUpdate, VentaCompletaResponse
+from models import ProductoModel, VentaUnitariaModel, TarifaModel, CierreUFModel
+from schemas import ProductoCreate, ProductoResponse, ProductoUpdate, VentaUnitariaCreate, VentaUnitariaResponse, VentaUnitariaUpdate, VentaConProductoResponse, TarifaCreate, TarifaResponse, TarifaUpdate, VentaCompletaResponse, CierreUFCreate, CierreUFResponse, CierreUFUpdate
 
 router = APIRouter(prefix="/productos", tags=["Productos"])
 
 ventas_router = APIRouter(prefix="/ventas-unitarias", tags=["Ventas Unitarias"])
 
 tarifas_router = APIRouter(prefix="/tarifas", tags=["Tarifas"])
+
+cierres_uf_router = APIRouter(prefix="/cierres-uf", tags=["Cierres UF"])
 
 
 @router.post("/", response_model=ProductoResponse)
@@ -387,3 +391,180 @@ async def importar_tarifas_json(file: UploadFile = File(...), db: Session = Depe
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error al procesar el archivo: {str(e)}")
+
+
+# Endpoints para Cierres UF
+@cierres_uf_router.post("/", response_model=CierreUFResponse)
+def create_cierre_uf(cierre: CierreUFCreate, db: Session = Depends(get_db)):
+    """Crear un nuevo cierre de UF"""
+    db_cierre = CierreUFModel(**cierre.model_dump())
+    db.add(db_cierre)
+    db.commit()
+    db.refresh(db_cierre)
+    return db_cierre
+
+
+@cierres_uf_router.get("/{cierre_id}", response_model=CierreUFResponse)
+def read_cierre_uf(cierre_id: int, db: Session = Depends(get_db)):
+    """Obtener un cierre de UF por ID"""
+    db_cierre = db.query(CierreUFModel).filter(CierreUFModel.id == cierre_id).first()
+    if db_cierre is None:
+        raise HTTPException(status_code=404, detail="Cierre UF no encontrado")
+    return db_cierre
+
+
+@cierres_uf_router.get("/", response_model=List[CierreUFResponse])
+def read_all_cierres_uf(db: Session = Depends(get_db)):
+    """Obtener todos los cierres de UF"""
+    return db.query(CierreUFModel).all()
+
+
+@cierres_uf_router.get("/ciclo/{ciclo}", response_model=CierreUFResponse)
+def read_cierre_uf_by_ciclo(ciclo: str, db: Session = Depends(get_db)):
+    """Obtener un cierre de UF por ciclo"""
+    db_cierre = db.query(CierreUFModel).filter(CierreUFModel.ciclo == ciclo).first()
+    if db_cierre is None:
+        raise HTTPException(status_code=404, detail="Cierre UF no encontrado para el ciclo")
+    return db_cierre
+
+
+@cierres_uf_router.put("/{cierre_id}", response_model=CierreUFResponse)
+def update_cierre_uf(cierre_id: int, cierre: CierreUFUpdate, db: Session = Depends(get_db)):
+    """Actualizar un cierre de UF existente"""
+    db_cierre = db.query(CierreUFModel).filter(CierreUFModel.id == cierre_id).first()
+    if db_cierre is None:
+        raise HTTPException(status_code=404, detail="Cierre UF no encontrado")
+    
+    update_data = cierre.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(db_cierre, field, value)
+    
+    db.commit()
+    db.refresh(db_cierre)
+    return db_cierre
+
+
+@cierres_uf_router.delete("/{cierre_id}")
+def delete_cierre_uf(cierre_id: int, db: Session = Depends(get_db)):
+    """Eliminar un cierre de UF"""
+    db_cierre = db.query(CierreUFModel).filter(CierreUFModel.id == cierre_id).first()
+    if db_cierre is None:
+        raise HTTPException(status_code=404, detail="Cierre UF no encontrado")
+    
+    db.delete(db_cierre)
+    db.commit()
+    return {"message": "Cierre UF eliminado correctamente"}
+
+
+@cierres_uf_router.post("/importar-json")
+async def importar_cierres_uf_json(file: UploadFile = File(...), db: Session = Depends(get_db)):
+    """Importar cierres de UF desde archivo JSON (cierreUF.json)"""
+    if not file.filename.endswith('.json'):
+        raise HTTPException(status_code=400, detail="El archivo debe ser un JSON")
+    
+    try:
+        # Leer el archivo JSON
+        content = await file.read()
+        cierres_data = json.loads(content)
+        
+        # Validar que sea una lista
+        if not isinstance(cierres_data, list):
+            raise HTTPException(status_code=400, detail="El JSON debe contener una lista de cierres UF")
+        
+        # Procesar cada elemento
+        registros_creados = 0
+        errores = []
+        
+        for index, cierre_item in enumerate(cierres_data):
+            try:
+                # Validar campos requeridos (soportar CICLO o ciclo)
+                ciclo = cierre_item.get('CICLO') or cierre_item.get('ciclo')
+                uf_pesos = cierre_item.get('UFpesos') or cierre_item.get('uf_pesos')
+                
+                if not ciclo or uf_pesos is None:
+                    errores.append(f"Elemento {index + 1}: Faltan campos requeridos (CICLO/ciclo y UFpesos/uf_pesos)")
+                    continue
+                
+                cierre_data = {
+                    'ciclo': str(ciclo),
+                    'uf_pesos': float(uf_pesos)
+                }
+                
+                # Upsert atómico para evitar race conditions
+                stmt = insert(CierreUFModel).values(**cierre_data)
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=['ciclo'],
+                    set_={'uf_pesos': stmt.excluded.uf_pesos}
+                )
+                db.execute(stmt)
+                registros_creados += 1
+            except Exception as e:
+                errores.append(f"Elemento {index + 1}: {str(e)}")
+        
+        db.commit()
+        
+        return {
+            "message": "Importación completada",
+            "registros_procesados": registros_creados,
+            "errores": errores if errores else None
+        }
+        
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Error al decodificar el archivo JSON")
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error al procesar el archivo: {str(e)}")
+
+
+@cierres_uf_router.post("/actualizar-desde-api")
+async def actualizar_cierres_desde_api(anios: List[int] = [2025, 2026], db: Session = Depends(get_db)):
+    """Actualizar cierres de UF consumiendo la API de miindicador.cl"""
+    try:
+        registros_creados = 0
+        errores = []
+        
+        for anio in anios:
+            try:
+                url = f"https://mindicador.cl/api/uf/{anio}"
+                resp = requests.get(url, timeout=20)
+                resp.raise_for_status()
+                data = resp.json()
+                
+                df = pd.DataFrame(data["serie"])
+                df["fecha"] = pd.to_datetime(df["fecha"])
+                df["fecha"] = df["fecha"].dt.tz_localize(None)
+                
+                # Obtener cierres de mes (último día de cada mes)
+                cierres = df.groupby([df["fecha"].dt.year, df["fecha"].dt.month]).tail(1)
+                
+                for _, row in cierres.iterrows():
+                    ciclo = row["fecha"].strftime("%Y%m")
+                    uf_pesos = row["valor"]
+                    
+                    # Upsert atómico para evitar race conditions
+                    cierre_data = {
+                        'ciclo': ciclo,
+                        'uf_pesos': float(uf_pesos)
+                    }
+                    stmt = insert(CierreUFModel).values(**cierre_data)
+                    stmt = stmt.on_conflict_do_update(
+                        index_elements=['ciclo'],
+                        set_={'uf_pesos': stmt.excluded.uf_pesos}
+                    )
+                    db.execute(stmt)
+                    registros_creados += 1
+                        
+            except Exception as e:
+                errores.append(f"Año {anio}: {str(e)}")
+        
+        db.commit()
+        
+        return {
+            "message": "Actualización desde API completada",
+            "registros_procesados": registros_creados,
+            "errores": errores if errores else None
+        }
+        
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error al consumir la API: {str(e)}")

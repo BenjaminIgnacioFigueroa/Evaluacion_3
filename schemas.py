@@ -150,3 +150,28 @@ class VentaCompletaResponse(BaseModel):
     tarifa_celda: Optional[str] = None
     tarifa_t2025: Optional[float] = None
     tarifa_t2026: Optional[float] = None
+
+
+class CierreUFBase(BaseModel):
+    """Schema base para cierres de UF"""
+    ciclo: str
+    uf_pesos: float
+
+
+class CierreUFCreate(CierreUFBase):
+    """Schema para crear cierres de UF"""
+    pass
+
+
+class CierreUFResponse(CierreUFBase):
+    """Schema para respuesta de cierres de UF"""
+    id: int
+    
+    class Config:
+        from_attributes = True
+
+
+class CierreUFUpdate(BaseModel):
+    """Schema para actualizar cierres de UF (todos los campos opcionales)"""
+    ciclo: Optional[str] = None
+    uf_pesos: Optional[float] = None

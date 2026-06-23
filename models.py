@@ -43,3 +43,13 @@ class TarifaModel(Base):
     celda = Column(String)  # identifica la celda en Excel para almacenar el dato final
     t2025 = Column(Float)  # valor de tarifa en UF por tonelada para año 2025
     t2026 = Column(Float)  # valor de tarifa en UF por tonelada para año 2026
+
+
+class CierreUFModel(Base):
+    """Modelo de cierres de UF por ciclo"""
+    
+    __tablename__ = "cierres_uf"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    ciclo = Column(String, index=True, unique=True)  # ciclo en formato YYYYMM (ej: "202501")
+    uf_pesos = Column(Float)  # valor de UF en pesos al cierre del mes
