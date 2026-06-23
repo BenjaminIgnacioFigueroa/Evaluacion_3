@@ -101,3 +101,52 @@ class VentaConProductoResponse(BaseModel):
     producto_tipo_material: Optional[str] = None
     producto_material: Optional[str] = None
     producto_riesgo: Optional[str] = None
+
+
+class TarifaBase(BaseModel):
+    """Schema base para tarifas"""
+    codigo: int
+    celda: str
+    t2025: float
+    t2026: float
+
+
+class TarifaCreate(TarifaBase):
+    """Schema para crear tarifas"""
+    pass
+
+
+class TarifaResponse(TarifaBase):
+    """Schema para respuesta de tarifas"""
+    id: int
+    
+    class Config:
+        from_attributes = True
+
+
+class TarifaUpdate(BaseModel):
+    """Schema para actualizar tarifas (todos los campos opcionales)"""
+    codigo: Optional[int] = None
+    celda: Optional[str] = None
+    t2025: Optional[float] = None
+    t2026: Optional[float] = None
+
+
+class VentaCompletaResponse(BaseModel):
+    """Schema para respuesta de ventas unitarias con producto y tarifa"""
+    id: int
+    ciclo: str
+    codigo_erp: str
+    cantidad: float
+    producto_nombre: Optional[str] = None
+    producto_peso_ton: Optional[float] = None
+    producto_peso_gr: Optional[float] = None
+    producto_codigo_interno: Optional[int] = None
+    producto_categoria: Optional[str] = None
+    producto_subcategoria: Optional[str] = None
+    producto_tipo_material: Optional[str] = None
+    producto_material: Optional[str] = None
+    producto_riesgo: Optional[str] = None
+    tarifa_celda: Optional[str] = None
+    tarifa_t2025: Optional[float] = None
+    tarifa_t2026: Optional[float] = None

@@ -2,13 +2,16 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 from typing import List
 import pandas as pd
+import json
 from database import get_db
-from models import ProductoModel, VentaUnitariaModel
-from schemas import ProductoCreate, ProductoResponse, ProductoUpdate, VentaUnitariaCreate, VentaUnitariaResponse, VentaUnitariaUpdate, VentaConProductoResponse
+from models import ProductoModel, VentaUnitariaModel, TarifaModel
+from schemas import ProductoCreate, ProductoResponse, ProductoUpdate, VentaUnitariaCreate, VentaUnitariaResponse, VentaUnitariaUpdate, VentaConProductoResponse, TarifaCreate, TarifaResponse, TarifaUpdate, VentaCompletaResponse
 
 router = APIRouter(prefix="/productos", tags=["Productos"])
 
 ventas_router = APIRouter(prefix="/ventas-unitarias", tags=["Ventas Unitarias"])
+
+tarifas_router = APIRouter(prefix="/tarifas", tags=["Tarifas"])
 
 
 @router.post("/", response_model=ProductoResponse)
@@ -223,3 +226,164 @@ def get_ventas_con_producto_por_ciclo(ciclo: str, db: Session = Depends(get_db))
         })
     
     return respuesta
+
+
+@ventas_router.get("/join-completo/{ciclo}", response_model=List[VentaCompletaResponse])
+def get_ventas_completas_por_ciclo(ciclo: str, db: Session = Depends(get_db)):
+    """Obtener ventas unitarias con información de producto y tarifa filtradas por ciclo"""
+    # Realizar join triple: VentaUnitaria -> ProductoModel -> TarifaModel
+    resultados = db.query(VentaUnitariaModel, ProductoModel, TarifaModel).join(
+        ProductoModel, 
+        VentaUnitariaModel.codigo_erp == ProductoModel.codigo_erp
+    ).join(
+        TarifaModel,
+        ProductoModel.codigo_interno == TarifaModel.codigo
+    ).filter(
+        VentaUnitariaModel.ciclo == ciclo
+    ).all()
+    
+    if not resultados:
+        raise HTTPException(status_code=404, detail=f"No se encontraron ventas para el ciclo {ciclo}")
+    
+    # Construir respuesta combinada
+    respuesta = []
+    for venta, producto, tarifa in resultados:
+        respuesta.append({
+            "id": venta.id,
+            "ciclo": venta.ciclo,
+            "codigo_erp": venta.codigo_erp,
+            "cantidad": venta.cantidad,
+            "producto_nombre": producto.nombre,
+            "producto_peso_ton": producto.peso_ton,
+            "producto_peso_gr": producto.peso_gr,
+            "producto_codigo_interno": producto.codigo_interno,
+            "producto_categoria": producto.categoria,
+            "producto_subcategoria": producto.subcategoria,
+            "producto_tipo_material": producto.tipo_material,
+            "producto_material": producto.material,
+            "producto_riesgo": producto.riesgo,
+            "tarifa_celda": tarifa.celda,
+            "tarifa_t2025": tarifa.t2025,
+            "tarifa_t2026": tarifa.t2026
+        })
+    
+    return respuesta
+
+
+# Endpoints para Tarifas
+@tarifas_router.post("/", response_model=TarifaResponse)
+def create_tarifa(tarifa: TarifaCreate, db: Session = Depends(get_db)):
+    """Crear una nueva tarifa"""
+    db_tarifa = TarifaModel(**tarifa.model_dump())
+    db.add(db_tarifa)
+    db.commit()
+    db.refresh(db_tarifa)
+    return db_tarifa
+
+
+@tarifas_router.get("/{tarifa_id}", response_model=TarifaResponse)
+def read_tarifa(tarifa_id: int, db: Session = Depends(get_db)):
+    """Obtener una tarifa por ID"""
+    db_tarifa = db.query(TarifaModel).filter(TarifaModel.id == tarifa_id).first()
+    if db_tarifa is None:
+        raise HTTPException(status_code=404, detail="Tarifa no encontrada")
+    return db_tarifa
+
+
+@tarifas_router.get("/", response_model=List[TarifaResponse])
+def read_all_tarifas(db: Session = Depends(get_db)):
+    """Obtener todas las tarifas"""
+    return db.query(TarifaModel).all()
+
+
+@tarifas_router.get("/codigo/{codigo}", response_model=TarifaResponse)
+def read_tarifa_by_codigo(codigo: int, db: Session = Depends(get_db)):
+    """Obtener una tarifa por código"""
+    db_tarifa = db.query(TarifaModel).filter(TarifaModel.codigo == codigo).first()
+    if db_tarifa is None:
+        raise HTTPException(status_code=404, detail="Tarifa no encontrada")
+    return db_tarifa
+
+
+@tarifas_router.put("/{tarifa_id}", response_model=TarifaResponse)
+def update_tarifa(tarifa_id: int, tarifa: TarifaUpdate, db: Session = Depends(get_db)):
+    """Actualizar una tarifa existente"""
+    db_tarifa = db.query(TarifaModel).filter(TarifaModel.id == tarifa_id).first()
+    if db_tarifa is None:
+        raise HTTPException(status_code=404, detail="Tarifa no encontrada")
+    
+    update_data = tarifa.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(db_tarifa, field, value)
+    
+    db.commit()
+    db.refresh(db_tarifa)
+    return db_tarifa
+
+
+@tarifas_router.delete("/{tarifa_id}")
+def delete_tarifa(tarifa_id: int, db: Session = Depends(get_db)):
+    """Eliminar una tarifa"""
+    db_tarifa = db.query(TarifaModel).filter(TarifaModel.id == tarifa_id).first()
+    if db_tarifa is None:
+        raise HTTPException(status_code=404, detail="Tarifa no encontrada")
+    
+    db.delete(db_tarifa)
+    db.commit()
+    return {"message": "Tarifa eliminada correctamente"}
+
+
+@tarifas_router.post("/importar-json")
+async def importar_tarifas_json(file: UploadFile = File(...), db: Session = Depends(get_db)):
+    """Importar tarifas desde archivo JSON (tarifas.json)"""
+    if not file.filename.endswith('.json'):
+        raise HTTPException(status_code=400, detail="El archivo debe ser un JSON")
+    
+    try:
+        # Leer el archivo JSON
+        content = await file.read()
+        tarifas_data = json.loads(content)
+        
+        # Validar que sea una lista
+        if not isinstance(tarifas_data, list):
+            raise HTTPException(status_code=400, detail="El JSON debe contener una lista de tarifas")
+        
+        # Procesar cada elemento
+        registros_creados = 0
+        errores = []
+        
+        for index, tarifa_item in enumerate(tarifas_data):
+            try:
+                # Validar campos requeridos
+                campos_requeridos = ['codigo', 'celda', 't2025', 't2026']
+                campos_faltantes = [campo for campo in campos_requeridos if campo not in tarifa_item]
+                if campos_faltantes:
+                    errores.append(f"Elemento {index + 1}: Faltan campos requeridos: {', '.join(campos_faltantes)}")
+                    continue
+                
+                tarifa_data = {
+                    'codigo': int(tarifa_item['codigo']),
+                    'celda': str(tarifa_item['celda']),
+                    't2025': float(tarifa_item['t2025']),
+                    't2026': float(tarifa_item['t2026'])
+                }
+                
+                db_tarifa = TarifaModel(**tarifa_data)
+                db.add(db_tarifa)
+                registros_creados += 1
+            except Exception as e:
+                errores.append(f"Elemento {index + 1}: {str(e)}")
+        
+        db.commit()
+        
+        return {
+            "message": "Importación completada",
+            "registros_creados": registros_creados,
+            "errores": errores if errores else None
+        }
+        
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Error al decodificar el archivo JSON")
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error al procesar el archivo: {str(e)}")
