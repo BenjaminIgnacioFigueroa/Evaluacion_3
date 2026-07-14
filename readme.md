@@ -305,7 +305,7 @@ El script crea automáticamente las siguientes tablas en SQLite:
 
 Con el entorno virtual activado:
 ```bash
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+uvicorn etl.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 **Opciones adicionales:**
