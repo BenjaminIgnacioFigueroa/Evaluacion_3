@@ -229,6 +229,11 @@ export const procesarDatos = async (periodo) => {
   return response.data;
 };
 
+export const procesarTodosCiclos = async () => {
+  const response = await api.post('/data-procesada/procesar-todos');
+  return response.data;
+};
+
 // Análisis
 export const getAnalisisBasico = async () => {
   const response = await api.get('/analisis/basico');

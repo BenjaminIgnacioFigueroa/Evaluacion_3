@@ -92,6 +92,11 @@ VentaUnitaria.xlsx → productos_erp → tarifas.json → cierreUF.json → data
 - **Node.js 18+** y npm
 - **Git** (para control de versiones)
 
+**Opcional para despliegue con contenedores:**
+- **Docker Engine 24+**
+- **Docker Compose 2.20+**
+- **Ubuntu/WSL2** si se ejecuta en Windows sin Docker Desktop
+
 ### 3.2 Archivos de Configuración Requeridos
 - `db.json`: Archivo con datos de productos para poblado inicial
 - `Parametros/tarifas.json`: Configuración de tarifas por producto
@@ -180,11 +185,92 @@ DATABASE_URL=mysql://usuario:password@localhost:3306/nombre_db
 
 ---
 
+### 4.5 Despliegue con Docker (Opcional)
+
+Esta sección permite levantar todo el sistema mediante contenedores, sin instalar Python ni Node.js localmente. Está diseñada para ejecutarse dentro de **Ubuntu/WSL2** en Windows.
+
+#### 4.5.1 Instalar Docker en Ubuntu/WSL2
+
+```bash
+sudo apt update
+sudo apt install docker.io docker-compose-v2
+sudo service docker start
+sudo usermod -aG docker $USER
+```
+
+**Nota:** Si `newgrp docker` no está disponible, instálalo con:
+```bash
+sudo apt install util-linux-extra
+newgrp docker
+```
+
+Cierra y vuelve a abrir la terminal para aplicar los cambios de grupo, o ejecuta `newgrp docker` en la sesión actual.
+
+#### 4.5.2 Archivos de Dockerización
+
+El repositorio incluye los siguientes archivos en la raíz:
+
+- `Dockerfile.backend`: Imagen del backend FastAPI.
+- `Dockerfile.frontend`: Imagen del frontend React + Vite.
+- `docker-compose.yml`: Orquestación de ambos servicios.
+- `.dockerignore`: Archivos excluidos de la imagen.
+- `requirements.txt`: Dependencias Python del backend.
+- `generate_db_json.py`: Script auxiliar para generar `db.json` desde `Parametros/tarifas.json`.
+
+#### 4.5.3 Generar base de datos inicial
+
+No es necesario ejecutar nada manualmente. Al levantar el contenedor, el backend ejecuta automáticamente:
+
+1. `generate_db_json.py` — lee los códigos ERP únicos desde `data/ventaUnitaria.xlsx` y genera `db.json` con un mapeo placeholder hacia los códigos internos de `tarifas.json`.
+2. `seed_database.py` — limpia y recarga los productos, tarifas y cierres UF en la base de datos.
+
+> **Nota sobre el mapeo ERP → código interno:** `generate_db_json.py` asigna códigos internos ciclando sobre `tarifas.json` como placeholder. Para obtener el mapeo real, exporta la tabla `productos_erp` desde MySQL y reemplaza `db.json` con el formato `{codigo_erp, nombre, peso_ton, peso_gr, codigo_interno, categoria, subcategoria, tipo_material, material, riesgo}`.
+
+#### 4.5.4 Construir y levantar los contenedores
+
+```bash
+docker compose up --build
+```
+
+La primera vez descarga las imágenes base y construye el proyecto.
+
+#### 4.5.5 Acceso a la aplicación
+
+Una vez iniciados los contenedores:
+
+- **Dashboard:** http://localhost:5173
+- **API Swagger:** http://localhost:8000/docs
+- **API ReDoc:** http://localhost:8000/redoc
+- **Health Check:** http://localhost:8000/health
+
+#### 4.5.6 Detener los contenedores
+
+```bash
+docker compose down
+```
+
+Para volver a levantar sin reconstruir imágenes:
+```bash
+docker compose up
+```
+
+---
+
 ## 5. Poblado de la Base de Datos
 
 ### 5.1 Verificar Archivo de Datos
 
 Asegúrese de que el archivo `db.json` exista en el directorio raíz con la estructura de productos.
+
+Si el archivo no existe, puede generarlo a partir de `Parametros/tarifas.json` ejecutando:
+
+```bash
+python generate_db_json.py
+```
+
+Este script lee los códigos ERP únicos desde `data/ventaUnitaria.xlsx` (si existe) y genera un producto por cada uno, asignando un `codigo_interno` de `tarifas.json` como placeholder. Si no encuentra el Excel, usa los códigos de `tarifas.json` como fallback.
+
+> **Importante:** El mapeo `codigo_erp → codigo_interno` es un placeholder. Para resultados correctos, reemplaza `db.json` con los datos reales exportados desde la tabla `productos_erp` de MySQL.
 
 ### 5.2 Ejecutar Script de Poblado
 
@@ -344,19 +430,33 @@ La API incluye documentación automática via Swagger UI:
 ### 8.3 Actualización de Datos
 
 1. **Actualizar ventas:**
-   - Reemplazar `VentaUnitaria.xlsx`
-   - Usar endpoint `POST /api/ventas` para cargar
+   - Reemplazar `data/ventaUnitaria.xlsx`
+   - Usar endpoint `POST /ventas-unitarias/importar-excel` para cargar
 
 2. **Actualizar tarifas:**
    - Modificar `Parametros/tarifas.json`
-   - Usar endpoint `POST /api/tarifas` para recargar
+   - Usar endpoint `POST /tarifas/importar-json` para recargar
 
 3. **Actualizar cierres UF:**
    - Modificar `Parametros/cierreUF.json`
-   - Usar endpoint `POST /api/cierres-uf` para recargar
+   - Usar endpoint `POST /cierres-uf/importar-json` para recargar
+   - Alternativa: usar `POST /cierres-uf/actualizar-desde-api` con body `[2025, 2026]`
 
 4. **Reprocesar datos:**
-   - Ejecutar `POST /api/analysis/process`
+   - Ejecutar `POST /data-procesada/procesar-todos`
+   - O ejecutar `POST /data-procesada/procesar/{periodo}` para un periodo específico
+
+### 8.4 Flujo de Carga Inicial Completo (Docker)
+
+Antes de procesar datos por primera vez, asegúrate de tener cargados los siguientes elementos:
+
+1. **Productos**: generados automáticamente desde `db.json` al levantar el contenedor.
+2. **Tarifas**: subir `Parametros/tarifas.json` vía `POST /tarifas/importar-json`.
+3. **Cierres UF**: subir `Parametros/cierreUF.json` vía `POST /cierres-uf/importar-json`, o consumir la API de miindicador.cl con `POST /cierres-uf/actualizar-desde-api`.
+4. **Ventas unitarias**: subir `data/ventaUnitaria.xlsx` vía `POST /ventas-unitarias/importar-excel`, o usar el botón **Cargar y Procesar Ventas** en la vista **Data Procesada**.
+5. **Procesar**: dentro del modal abierto, elegir **Procesar Todos los Ciclos** o **Procesar Periodo Específico**. Al finalizar, la página se recargará automáticamente.
+
+Una vez completados estos pasos, el dashboard mostrará los datos procesados.
 
 ---
 
@@ -389,7 +489,42 @@ python -m json.tool db.json  # Validar JSON
 # Asegurar que el origen del frontend esté permitido
 ```
 
-### 9.2 Verificación de Conexión a Base de Datos
+### 9.2 Errores en Docker
+
+**Error: `ModuleNotFoundError: No module named 'etl'` al iniciar el backend**
+```bash
+# Causa: PYTHONPATH no incluye /app al ejecutar seed_database.py
+# Solución: Asegúrate de usar el docker-compose.yml actualizado,
+# donde el comando incluye: PYTHONPATH=/app python etl/seed_database.py
+```
+
+**Error: `permission denied` al ejecutar Docker**
+```bash
+# Causa: El usuario no pertenece al grupo docker
+# Solución: Agregar usuario al grupo y reiniciar sesión
+sudo usermod -aG docker $USER
+newgrp docker
+# O usar sudo temporalmente
+sudo docker compose up --build
+```
+
+**Error: `404 Not Found` al procesar un periodo (`POST /data-procesada/procesar/{periodo}`)**
+```bash
+# Causa: No existen ventas unitarias o cierres UF para el periodo indicado.
+# Solución:
+# 1. Cargar ventas: POST /ventas-unitarias/importar-excel
+# 2. Cargar cierres UF: POST /cierres-uf/importar-json
+# 3. Volver a ejecutar el procesamiento
+```
+
+**Error: `422 Unprocessable Entity` al actualizar cierres UF desde API**
+```bash
+# Causa: El frontend envía { anios: [2025, 2026] } pero el backend esperaba la lista directa.
+# Solución: Corregido en routers/data.py usando Body([2025, 2026], embed=True).
+# Reconstruir imagen con: docker compose up --build
+```
+
+### 9.3 Verificación de Conexión a Base de Datos
 
 ```python
 # En terminal Python
@@ -399,11 +534,11 @@ python
 True  # Si la conexión es exitosa
 ```
 
-### 9.3 Logs y Debugging
+### 9.4 Logs y Debugging
 
-- **Backend logs:** Consola donde se ejecuta `uvicorn`
-- **Frontend logs:** Consola del navegador (F12) y terminal Vite
-- **Base de datos:** Archivo `data_science.db` (SQLite)
+- **Backend logs:** Consola donde se ejecuta `uvicorn` o `docker logs evaluacion_backend`
+- **Frontend logs:** Consola del navegador (F12) y terminal Vite o `docker logs evaluacion_frontend`
+- **Base de datos:** Archivo `data/data_science.db` (SQLite) mapeado mediante volumen
 
 ---
 
@@ -437,8 +572,13 @@ Evaluacion_3/
 ├── models.py              # Modelos SQLAlchemy
 ├── schemas.py             # Esquemas Pydantic
 ├── seed_database.py       # Script de poblado inicial
+├── generate_db_json.py    # Generador de db.json desde tarifas.json
 ├── db.json                # Datos iniciales de productos
 ├── requirements.txt       # Dependencias Python
+├── Dockerfile.backend     # Imagen Docker del backend
+├── Dockerfile.frontend    # Imagen Docker del frontend
+├── docker-compose.yml     # Orquestación de servicios
+├── .dockerignore          # Archivos excluidos de las imágenes Docker
 └── .env                   # Variables de entorno
 ```
 
@@ -468,7 +608,46 @@ node_modules/
 
 ---
 
-## 12. Contacto y Soporte
+## 12. Screenshots
+
+### 12.1 Dashboard
+
+![alt text](image.png)
+
+Vista general del sistema. Muestra estadísticas de productos y ventas cargadas, gráfico comparativo de ventas por ciclo (mes/año), y gráficos de Total CLP procesado por año y por periodo. Incluye alerta automática cuando hay ventas sin procesar y acceso rápido a las secciones principales.
+
+---
+
+### 12.2 Productos
+
+![alt text](image-1.png)
+
+Catálogo de productos de reciclaje cargados en el sistema. Permite buscar por nombre, código o categoría, y gestionar (crear, editar, eliminar) cada producto con sus atributos: código ERP, código interno, peso en toneladas y gramos, categoría, material y nivel de riesgo.
+
+---
+
+### 12.3 Cierre UF
+
+![alt text](image-2.png)
+
+Tabla de valores de cierre de la UF por periodo (formato YYYYMM). Los valores son utilizados para convertir los totales calculados en UF a pesos chilenos (CLP) durante el procesamiento. Permite actualizar los valores manualmente, importar desde JSON o sincronizar automáticamente desde la API de mindicador.cl.
+
+---
+
+### 12.4 Data Procesada
+
+![alt text](image-3.png)
+
+Resultados del procesamiento de ventas. Muestra por cada periodo y producto: toneladas, gramos, cantidad, total en UF y total en CLP. Incluye gráficos de toneladas por categoría y CLP por periodo, filtros por periodo y búsqueda por categoría/material/celda. Permite cargar el Excel de ventas y ejecutar el procesamiento desde esta misma vista.
+
+---
+
+### 12.5 Docker
+
+![alt text](image-4.png)
+
+
+## 13. Contacto y Soporte
 
 Para consultas técnicas o reporte de errores, contactar al equipo de desarrollo.
 

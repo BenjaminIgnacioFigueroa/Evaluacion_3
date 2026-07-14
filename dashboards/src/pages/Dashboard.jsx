@@ -4,7 +4,10 @@ import {
   ShoppingCart, 
   RefreshCw,
   Filter,
-  FileText
+  FileText,
+  DollarSign,
+  AlertTriangle,
+  Play
 } from 'lucide-react';
 import {
   BarChart,
@@ -22,7 +25,8 @@ import {
 import {
   getProductos,
   getVentasUnitarias,
-  getDataProcesada
+  getDataProcesada,
+  procesarTodosCiclos
 } from '../services/api';
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
@@ -50,8 +54,12 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({
     productos: 0,
-    ventas: 0
+    ventas: 0,
+    dataProcesada: 0,
+    totalClp: 0
   });
+  const [procesando, setProcesando] = useState(false);
+  const [processMsg, setProcessMsg] = useState('');
   const [ventasPorCiclo, setVentasPorCiclo] = useState([]);
   const [selectedCiclo, setSelectedCiclo] = useState('');
   const [availableCiclos, setAvailableCiclos] = useState([]);
@@ -140,9 +148,12 @@ const Dashboard = () => {
         getDataProcesada()
       ]);
 
+      const totalClp = dataProc.reduce((sum, d) => sum + (d.total_clp || 0), 0);
       setStats({
         productos: productos.length,
-        ventas: ventas.length
+        ventas: ventas.length,
+        dataProcesada: dataProc.length,
+        totalClp
       });
 
       // Agrupar ventas por mes y año (para gráfico comparativo)
@@ -273,6 +284,41 @@ const Dashboard = () => {
         </div>
       </div>
 
+      {/* Warning banner when data_procesada is empty */}
+      {stats.dataProcesada === 0 && stats.ventas > 0 && (
+        <div className="flex items-center gap-3 rounded-lg border border-yellow-400 bg-yellow-50 p-4 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300">
+          <AlertTriangle className="h-5 w-5 shrink-0" />
+          <span className="flex-1 text-sm">
+            Hay <strong>{stats.ventas}</strong> ventas cargadas pero no se han procesado. Ve a <strong>Data Procesada</strong> y haz clic en "Cargar y Procesar Ventas" → "Procesar Todos los Ciclos".
+          </span>
+          <button
+            onClick={async () => {
+              setProcesando(true);
+              setProcessMsg('');
+              try {
+                const result = await procesarTodosCiclos();
+                setProcessMsg(`Procesados: ${result.ciclos_procesados} ciclos. ${(result.errores || []).join(' | ')}`);
+                await loadDashboardData();
+              } catch (e) {
+                setProcessMsg('Error: ' + e.message);
+              } finally {
+                setProcesando(false);
+              }
+            }}
+            disabled={procesando}
+            className="flex shrink-0 items-center gap-1 rounded-md bg-yellow-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-yellow-700 disabled:opacity-50"
+          >
+            <Play size={12} />
+            {procesando ? 'Procesando...' : 'Procesar ahora'}
+          </button>
+        </div>
+      )}
+      {processMsg && (
+        <div className="rounded-lg border border-border bg-card p-3 text-sm text-muted-foreground">
+          {processMsg}
+        </div>
+      )}
+
       {/* Stats Cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-2">
         <StatCard
@@ -286,6 +332,22 @@ const Dashboard = () => {
           icon={ShoppingCart}
         />
       </div>
+
+      {/* Data Procesada summary */}
+      {stats.dataProcesada > 0 && (
+        <div className="grid gap-4 md:grid-cols-2">
+          <StatCard
+            title="Registros Procesados"
+            value={stats.dataProcesada.toLocaleString('es-CL')}
+            icon={FileText}
+          />
+          <StatCard
+            title="Total CLP Procesado"
+            value={`$ ${stats.totalClp.toLocaleString('es-CL')}`}
+            icon={DollarSign}
+          />
+        </div>
+      )}
 
       {/* Charts */}
       <div className="grid gap-6 md:grid-cols-1">

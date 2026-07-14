@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+pandas
+requests
+python-multipart
+openpyxl
+pydantic

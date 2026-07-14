@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
-import { Search, RefreshCw, Play, TrendingUp, DollarSign, Package } from 'lucide-react';
+import { Search, RefreshCw, Play, TrendingUp, DollarSign, Package, Upload, Database } from 'lucide-react';
 import {
   getDataProcesada,
   getDataProcesadaByPeriodo,
-  procesarDatos
+  procesarDatos,
+  importarVentasExcel,
+  procesarTodosCiclos
 } from '../services/api';
 import {
   BarChart,
@@ -23,9 +25,17 @@ const DataProcesada = () => {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterPeriodo, setFilterPeriodo] = useState('');
-  const [showProcessModal, setShowProcessModal] = useState(false);
   const [periodoToProcess, setPeriodoToProcess] = useState('');
   const [processing, setProcessing] = useState(false);
+
+  // Modal unificado: cargar ventas y procesar
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [processingAll, setProcessingAll] = useState(false);
+  const [uploadMessage, setUploadMessage] = useState('');
+  const [processMessage, setProcessMessage] = useState('');
+  const [showPeriodInput, setShowPeriodInput] = useState(false);
 
   useEffect(() => {
     loadDataProcesada();
@@ -43,25 +53,91 @@ const DataProcesada = () => {
     }
   };
 
-  const handleProcess = async (e) => {
+  const handleFileChange = (e) => {
+    setSelectedFile(e.target.files[0]);
+    setUploadMessage('');
+    setProcessMessage('');
+  };
+
+  const handleUploadExcel = async () => {
+    if (!selectedFile) {
+      setUploadMessage('Por favor seleccione un archivo Excel');
+      return;
+    }
+    try {
+      setUploading(true);
+      setUploadMessage('');
+      await importarVentasExcel(selectedFile);
+      setUploadMessage('Ventas importadas exitosamente. Ahora puede procesar los datos.');
+      setSelectedFile(null);
+      const fileInput = document.getElementById('ventas-file-input');
+      if (fileInput) fileInput.value = '';
+    } catch (error) {
+      console.error('Error importing ventas:', error);
+      setUploadMessage('Error al importar ventas: ' + error.message);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleProcessAll = async () => {
+    try {
+      setProcessingAll(true);
+      setProcessMessage('');
+      const result = await procesarTodosCiclos();
+      const ciclosProcesados = result.ciclos_procesados ?? 0;
+      const errores = result.errores ?? [];
+      let msg = `Ciclos procesados: ${ciclosProcesados} de ${result.total_ciclos ?? '?'}.`;
+      if (errores.length > 0) {
+        msg += ` Errores: ${errores.join(' | ')}`;
+      }
+      if (ciclosProcesados > 0) {
+        msg += ' La página se recargará.';
+        setProcessMessage(msg);
+        setTimeout(() => {
+          window.location.reload();
+        }, 3000);
+      } else {
+        setProcessMessage(msg);
+      }
+    } catch (error) {
+      console.error('Error processing all cycles:', error);
+      setProcessMessage('Error al procesar todos los ciclos: ' + error.message);
+    } finally {
+      setProcessingAll(false);
+    }
+  };
+
+  const handleProcessPeriodFromModal = async (e) => {
     e.preventDefault();
     if (!periodoToProcess) {
-      alert('Por favor ingrese un periodo');
+      setProcessMessage('Por favor ingrese un periodo');
       return;
     }
     try {
       setProcessing(true);
+      setProcessMessage('');
       await procesarDatos(periodoToProcess);
-      alert('Procesamiento completado exitosamente');
-      setShowProcessModal(false);
-      setPeriodoToProcess('');
-      loadDataProcesada();
+      setProcessMessage(`Periodo ${periodoToProcess} procesado exitosamente. La página se recargará.`);
+      setTimeout(() => {
+        window.location.reload();
+      }, 1500);
     } catch (error) {
       console.error('Error processing data:', error);
-      alert('Error al procesar datos: ' + error.message);
+      setProcessMessage('Error al procesar datos: ' + error.message);
     } finally {
       setProcessing(false);
     }
+  };
+
+  const closeUploadModal = () => {
+    setShowUploadModal(false);
+    setSelectedFile(null);
+    setUploadMessage('');
+    setProcessMessage('');
+    setShowPeriodInput(false);
+    const fileInput = document.getElementById('ventas-file-input');
+    if (fileInput) fileInput.value = '';
   };
 
   const periodosUnicos = [...new Set(dataProcesada.map(d => d.periodo))].sort();
@@ -111,18 +187,20 @@ const DataProcesada = () => {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
           <h1 className="text-3xl font-bold text-foreground">Data Procesada</h1>
           <p className="text-muted-foreground">Análisis de datos procesados con cálculos de UF y CLP</p>
         </div>
-        <button
-          onClick={() => setShowProcessModal(true)}
-          className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-        >
-          <Play size={16} />
-          Procesar Periodo
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => setShowUploadModal(true)}
+            className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+          >
+            <Upload size={16} />
+            Cargar y Procesar Ventas
+          </button>
+        </div>
       </div>
 
       {/* Stats Cards */}
@@ -268,46 +346,101 @@ const DataProcesada = () => {
         )}
       </div>
 
-      {/* Modal Procesar */}
-      {showProcessModal && (
+      {/* Modal Cargar y Procesar Ventas */}
+      {showUploadModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="w-full max-w-md rounded-lg bg-card p-6 shadow-lg">
-            <h2 className="mb-4 text-xl font-bold text-foreground">Procesar Datos por Periodo</h2>
-            <form onSubmit={handleProcess} className="space-y-4">
+            <h2 className="mb-4 text-xl font-bold text-foreground">Cargar y Procesar Ventas</h2>
+            <div className="space-y-4">
+              {/* Paso 1: Subir archivo */}
               <div>
-                <label className="mb-1 block text-sm font-medium text-foreground">Periodo (YYYYMM)</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Ej: 202501"
-                  value={periodoToProcess}
-                  onChange={(e) => setPeriodoToProcess(e.target.value)}
-                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                />
-                <p className="mt-2 text-xs text-muted-foreground">
-                  Esto procesará las ventas del periodo y generará los cálculos de UF y CLP
-                </p>
+                <label className="mb-1 block text-sm font-medium text-foreground">Archivo de Ventas Unitarias</label>
+                <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-border bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-accent">
+                  <Upload size={16} />
+                  <span>{selectedFile ? selectedFile.name : 'Seleccionar Excel (.xlsx, .xls)'}</span>
+                  <input
+                    id="ventas-file-input"
+                    type="file"
+                    accept=".xlsx,.xls"
+                    onChange={handleFileChange}
+                    className="hidden"
+                  />
+                </label>
+                <button
+                  onClick={handleUploadExcel}
+                  disabled={!selectedFile || uploading}
+                  className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                >
+                  <Upload size={16} />
+                  {uploading ? 'Subiendo...' : 'Subir Ventas'}
+                </button>
               </div>
-              <div className="flex justify-end gap-3">
+
+              {/* Mensajes */}
+              {uploadMessage && (
+                <div className="rounded-lg bg-blue-50 p-3 text-sm text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+                  {uploadMessage}
+                </div>
+              )}
+
+              {/* Paso 2: Procesar */}
+              <div className="rounded-lg border border-border p-4">
+                <h3 className="mb-3 text-sm font-semibold text-foreground">Procesar datos</h3>
+                <div className="flex flex-col gap-2">
+                  <button
+                    onClick={handleProcessAll}
+                    disabled={processingAll}
+                    className="flex items-center justify-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
+                  >
+                    <Database size={16} />
+                    {processingAll ? 'Procesando...' : 'Procesar Todos los Ciclos'}
+                  </button>
+                  <button
+                    onClick={() => setShowPeriodInput(!showPeriodInput)}
+                    className="flex items-center justify-center gap-2 rounded-lg border border-border bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-accent"
+                  >
+                    <Play size={16} />
+                    {showPeriodInput ? 'Ocultar Procesar Periodo' : 'Procesar Periodo Específico'}
+                  </button>
+                  {showPeriodInput && (
+                    <form onSubmit={handleProcessPeriodFromModal} className="space-y-2">
+                      <input
+                        type="text"
+                        required
+                        placeholder="Ej: 202501"
+                        value={periodoToProcess}
+                        onChange={(e) => setPeriodoToProcess(e.target.value)}
+                        className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                      />
+                      <button
+                        type="submit"
+                        disabled={processing}
+                        className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                      >
+                        <Play size={16} />
+                        {processing ? 'Procesando...' : 'Procesar Periodo'}
+                      </button>
+                    </form>
+                  )}
+                </div>
+              </div>
+
+              {processMessage && (
+                <div className={`rounded-lg p-3 text-sm ${processMessage.includes('Errores:') && !processMessage.includes('La página se recargará') ? 'bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300' : 'bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-300'}`}>
+                  {processMessage}
+                </div>
+              )}
+
+              <div className="flex justify-end">
                 <button
                   type="button"
-                  onClick={() => {
-                    setShowProcessModal(false);
-                    setPeriodoToProcess('');
-                  }}
+                  onClick={closeUploadModal}
                   className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-accent"
                 >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={processing}
-                  className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-                >
-                  {processing ? 'Procesando...' : 'Procesar'}
+                  Cerrar
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}

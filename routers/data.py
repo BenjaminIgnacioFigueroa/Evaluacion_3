@@ -1,8 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Body, Depends, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from sqlalchemy.dialects.postgresql import insert
 from typing import List, Optional
+import re
 import pandas as pd
 import json
 import requests
@@ -10,6 +10,16 @@ import io
 from etl.database import get_db
 from etl.models import ProductoModel, VentaUnitariaModel, TarifaModel, CierreUFModel, DataProcesadaModel
 from etl.schemas import ProductoCreate, ProductoResponse, ProductoUpdate, VentaUnitariaCreate, VentaUnitariaResponse, VentaUnitariaUpdate, VentaConProductoResponse, TarifaCreate, TarifaResponse, TarifaUpdate, VentaCompletaResponse, CierreUFCreate, CierreUFResponse, CierreUFUpdate, DataProcesadaCreate, DataProcesadaResponse, DataProcesadaUpdate
+
+
+def upsert_cierre_uf(db: Session, ciclo: str, uf_pesos: float):
+    """Inserta o actualiza un cierre UF de forma compatible con SQLite."""
+    existing = db.query(CierreUFModel).filter(CierreUFModel.ciclo == ciclo).first()
+    if existing:
+        existing.uf_pesos = float(uf_pesos)
+    else:
+        db.add(CierreUFModel(ciclo=ciclo, uf_pesos=float(uf_pesos)))
+
 
 router = APIRouter(prefix="/productos", tags=["Productos"])
 
@@ -169,15 +179,35 @@ async def importar_ventas_excel(file: UploadFile = File(...), db: Session = Depe
                 detail=f"Faltan columnas requeridas: {', '.join(columnas_faltantes)}"
             )
         
+        # Limpiar registros anteriores antes de importar
+        db.query(VentaUnitariaModel).delete()
+        db.commit()
+
         # Procesar cada fila
         registros_creados = 0
         errores = []
         
         for index, row in df.iterrows():
             try:
+                # Normalize ciclo: convert float (202501.0) → int str ("202501")
+                ciclo_raw = row['ciclo']
+                try:
+                    ciclo_str = str(int(float(ciclo_raw)))
+                except (ValueError, TypeError):
+                    ciclo_str = str(ciclo_raw).strip()
+
+                # Normalize codigo_erp: strip trailing .0 if numeric, then strip non-numeric suffix (e.g. "774070UN" → "774070")
+                erp_raw = row['codigo_erp']
+                try:
+                    erp_str = str(int(float(erp_raw)))
+                except (ValueError, TypeError):
+                    erp_str = str(erp_raw).strip()
+                # Remove trailing non-numeric characters (e.g. "UN", "KG")
+                erp_str = re.sub(r'[^0-9]+$', '', erp_str)
+
                 venta_data = {
-                    'ciclo': str(row['ciclo']),
-                    'codigo_erp': str(row['codigo_erp']),
+                    'ciclo': ciclo_str,
+                    'codigo_erp': erp_str,
                     'cantidad': float(row['cantidad'])
                 }
                 
@@ -489,30 +519,19 @@ async def importar_cierres_uf_json(file: UploadFile = File(...), db: Session = D
                     errores.append(f"Elemento {index + 1}: Faltan campos requeridos (CICLO/ciclo y UFpesos/uf_pesos)")
                     continue
                 
-                cierre_data = {
-                    'ciclo': str(ciclo),
-                    'uf_pesos': float(uf_pesos)
-                }
-                
-                # Upsert atómico para evitar race conditions
-                stmt = insert(CierreUFModel).values(**cierre_data)
-                stmt = stmt.on_conflict_do_update(
-                    index_elements=['ciclo'],
-                    set_={'uf_pesos': stmt.excluded.uf_pesos}
-                )
-                db.execute(stmt)
+                upsert_cierre_uf(db, str(ciclo), float(uf_pesos))
                 registros_creados += 1
             except Exception as e:
                 errores.append(f"Elemento {index + 1}: {str(e)}")
-        
+
         db.commit()
-        
+
         return {
             "message": "Importación completada",
             "registros_procesados": registros_creados,
             "errores": errores if errores else None
         }
-        
+
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Error al decodificar el archivo JSON")
     except Exception as e:
@@ -521,7 +540,7 @@ async def importar_cierres_uf_json(file: UploadFile = File(...), db: Session = D
 
 
 @cierres_uf_router.post("/actualizar-desde-api")
-async def actualizar_cierres_desde_api(anios: List[int] = [2025, 2026], db: Session = Depends(get_db)):
+async def actualizar_cierres_desde_api(anios: List[int] = Body([2025, 2026], embed=True), db: Session = Depends(get_db)):
     """Actualizar cierres de UF consumiendo la API de miindicador.cl"""
     try:
         registros_creados = 0
@@ -545,19 +564,9 @@ async def actualizar_cierres_desde_api(anios: List[int] = [2025, 2026], db: Sess
                     ciclo = row["fecha"].strftime("%Y%m")
                     uf_pesos = row["valor"]
                     
-                    # Upsert atómico para evitar race conditions
-                    cierre_data = {
-                        'ciclo': ciclo,
-                        'uf_pesos': float(uf_pesos)
-                    }
-                    stmt = insert(CierreUFModel).values(**cierre_data)
-                    stmt = stmt.on_conflict_do_update(
-                        index_elements=['ciclo'],
-                        set_={'uf_pesos': stmt.excluded.uf_pesos}
-                    )
-                    db.execute(stmt)
+                    upsert_cierre_uf(db, ciclo, float(uf_pesos))
                     registros_creados += 1
-                        
+
             except Exception as e:
                 errores.append(f"Año {anio}: {str(e)}")
         
@@ -575,6 +584,20 @@ async def actualizar_cierres_desde_api(anios: List[int] = [2025, 2026], db: Sess
 
 
 # Endpoints para Data Procesada
+@data_procesada_router.get("/debug/ciclos")
+def debug_ciclos(db: Session = Depends(get_db)):
+    """Diagnóstico: muestra ciclos en ventas vs cierres_uf y si hay match"""
+    ciclos_ventas = [c[0] for c in db.query(VentaUnitariaModel.ciclo).distinct().all()]
+    ciclos_uf = [c[0] for c in db.query(CierreUFModel.ciclo).distinct().all()]
+    muestra_ventas = db.query(VentaUnitariaModel).limit(3).all()
+    return {
+        "ciclos_en_ventas": sorted(ciclos_ventas),
+        "ciclos_en_cierres_uf": sorted(ciclos_uf),
+        "ciclos_sin_uf": sorted([c for c in ciclos_ventas if c not in ciclos_uf]),
+        "muestra_ventas_raw": [{"ciclo": v.ciclo, "codigo_erp": v.codigo_erp, "cantidad": v.cantidad} for v in muestra_ventas],
+    }
+
+
 @data_procesada_router.post("/procesar-todos")
 def procesar_todos_ciclos(db: Session = Depends(get_db)):
     """Procesar datos para todos los ciclos disponibles en ventas_unitarias"""

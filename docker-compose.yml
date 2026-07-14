@@ -1,0 +1,32 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: evaluacion_backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - DATABASE_URL=sqlite:///./data/data_science.db
+      - PYTHONPATH=/app
+    command: >
+      sh -c "
+        python -c 'from etl.database import init_database, create_tables; from etl.models import Base; init_database() and create_tables(Base)' &&
+        PYTHONPATH=/app python generate_db_json.py &&
+        PYTHONPATH=/app python etl/seed_database.py &&
+        uvicorn etl.main:app --host 0.0.0.0 --port 8000
+      "
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: evaluacion_frontend
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://localhost:8000
+    depends_on:
+      - backend

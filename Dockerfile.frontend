@@ -1,0 +1,12 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+COPY dashboards/package.json dashboards/package-lock.json* ./
+RUN npm install
+
+COPY dashboards/ .
+
+EXPOSE 5173
+
+CMD ["npm", "run", "dev", "--", "--host"]
